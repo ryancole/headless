@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Headless.Protocol/Headless.Protocol.csproj" />
+  <Project Path="Headless.Server/Headless.Server.csproj" />
+  <Project Path="Headless.Sim/Headless.Sim.csproj" />
+  <Project Path="Headless.Sim.Tests/Headless.Sim.Tests.csproj" />
+</Solution>
