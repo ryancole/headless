@@ -11,9 +11,14 @@ public sealed class Simulation(World world)
     /// <summary>Advances the world by one tick.</summary>
     public void Step() => World.Tick++;
 
-    public SensorSnapshot Sense(int shipId)
+    public SensorSnapshot Sense(int shipId) => new(World.Tick, ShipStateOf(World.Ships[shipId]));
+
+    public PlayerSnapshot SensePlayer(int playerId)
     {
-        var ship = World.Ships[shipId];
-        return new SensorSnapshot(World.Tick, new ShipState(ship.Id, ship.Name, ship.Position));
+        var player = World.Players[playerId];
+        var ships = World.Ships.Values.Where(s => s.OwnerPlayerId == playerId).Select(ShipStateOf).ToList();
+        return new PlayerSnapshot(World.Tick, new PlayerState(player.Id, player.Name), ships);
     }
+
+    private static ShipState ShipStateOf(Ship ship) => new(ship.Id, ship.Name, ship.OwnerPlayerId, ship.Position);
 }

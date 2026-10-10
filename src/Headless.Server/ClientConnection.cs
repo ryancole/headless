@@ -7,9 +7,10 @@ using Headless.Protocol.V1;
 
 namespace Headless.Server;
 
-/// <summary>One bot's WebSocket. Outgoing messages go through a small bounded queue that drops the oldest
-/// snapshot when the bot falls behind — a slow bot sees fresher state, it never backs up the server.</summary>
-public sealed class BotConnection(int shipId, WebSocket socket)
+/// <summary>One client's WebSocket (a bot or a player). Outgoing messages go through a small bounded queue that
+/// drops the oldest snapshot when the client falls behind — a slow client sees fresher state, it never backs up
+/// the server.</summary>
+public sealed class ClientConnection(WebSocket socket)
 {
     private const int MaxMessageBytes = 64 * 1024;
 
@@ -18,8 +19,6 @@ public sealed class BotConnection(int shipId, WebSocket socket)
     private readonly CancellationTokenSource _closed = new();
     private string _closeReason = "closed";
     private WebSocketCloseStatus _closeStatus = WebSocketCloseStatus.NormalClosure;
-
-    public int ShipId { get; } = shipId;
 
     public void Send(ServerMessage message) => _outbox.Writer.TryWrite(message);
 
@@ -36,7 +35,7 @@ public sealed class BotConnection(int shipId, WebSocket socket)
         var send = SendLoopAsync(sendCts.Token);
 
         // Close() deliberately doesn't cancel the receive: cancelling a WebSocket receive aborts the socket
-        // without a close frame. Instead we send our close frame below, and the bot's reply ends the loop.
+        // without a close frame. Instead we send our close frame below, and the client's reply ends the loop.
         var receive = ReceiveLoopAsync(requestAborted);
 
         await Task.WhenAny(send, receive);
@@ -53,7 +52,7 @@ public sealed class BotConnection(int shipId, WebSocket socket)
             }
             catch (Exception ex) when (ex is OperationCanceledException or WebSocketException)
             {
-                socket.Abort(); // The bot didn't finish the close handshake in time.
+                socket.Abort(); // The client didn't finish the close handshake in time.
             }
         }
         await Quietly(receive);
@@ -93,8 +92,8 @@ public sealed class BotConnection(int shipId, WebSocket socket)
                 }
             } while (!result.EndOfMessage);
 
-            // Bots have nothing to send yet; tell them rather than silently dropping it.
-            Send(new ErrorMessage("unsupported_message", "The server doesn't accept messages from bots yet."));
+            // Clients have nothing to send yet; tell them rather than silently dropping it.
+            Send(new ErrorMessage("unsupported_message", "The server doesn't accept messages from clients yet."));
         }
     }
 }

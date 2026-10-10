@@ -12,12 +12,24 @@ public sealed class GameOptions
 
     public SimConfig Sim { get; set; } = new();
 
-    /// <summary>Ships spawned at startup, each controllable by the bot holding its token. Dev-only until accounts exist.</summary>
-    public List<ShipSlot> Ships { get; set; } = [];
+    /// <summary>Players spawned at startup, each with one ship they own. Dev-only until accounts exist.</summary>
+    public List<PlayerSlot> Players { get; set; } = [];
+}
+
+public sealed class PlayerSlot
+{
+    public string Name { get; set; } = "";
+
+    /// <summary>Lets a player client connect as this player (<c>/v1/player</c>).</summary>
+    public string Token { get; set; } = "";
+
+    public ShipSlot Ship { get; set; } = new();
 }
 
 public sealed class ShipSlot
 {
     public string Name { get; set; } = "";
-    public string Token { get; set; } = "";
+
+    /// <summary>Lets a bot connect and control this ship (<c>/v1/bot</c>). Separate from the player's token.</summary>
+    public string BotToken { get; set; } = "";
 }

@@ -2,18 +2,18 @@
 
 An online space game played by bots. You write the code that flies your ship; the server decides what happens.
 
-Right now the server only tracks ships and their positions. Bots connect and receive their ship's position each tick; the server logs where every ship is.
+Right now the server tracks players and their ships. Every ship has a position and an owner (a player), and is flown by a bot. Bots and players connect separately and receive a snapshot each tick; the server logs where every ship is and who owns it.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/Headless.Sim` | Simulation core: ships with a position. No networking. |
+| `src/Headless.Sim` | Simulation core: players, and ships with a position. No networking. |
 | `src/Headless.Protocol` | Bot protocol wire types (v1) and JSON settings. |
-| `src/Headless.Server` | ASP.NET Core host: tick loop and the `/v1/bot` WebSocket. |
+| `src/Headless.Server` | ASP.NET Core host: tick loop and the `/v1/bot` and `/v1/player` WebSockets. |
 | `src/Headless.Sim.Tests` | xUnit tests for the sim. |
 | `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
-| `docs/` | [Core loop](docs/core-loop.md), [bot protocol v1](docs/protocol-v1.md). |
+| `docs/` | [Core loop](docs/core-loop.md), [protocol v1](docs/protocol-v1.md). |
 
 ## Quick start
 
@@ -25,9 +25,16 @@ dotnet test src
 dotnet run --project src/Headless.Server
 ```
 
-The server listens on `http://localhost:5080`. In Development it spawns two ships, with tokens `dev-token-1`
-and `dev-token-2` (set in `appsettings.Development.json`). Then start a bot by following
-[src/bots/python/hello](src/bots/python/hello/README.md).
+The server listens on `http://localhost:5080`. In Development it spawns two players, each owning one
+ship (set in `appsettings.Development.json`):
+
+| Player | Player token | Ship | Bot token |
+|---|---|---|---|
+| Player One | `dev-player-1` | Prospector | `dev-token-1` |
+| Player Two | `dev-player-2` | Wildcat | `dev-token-2` |
+
+Then start a bot by following [src/bots/python/hello](src/bots/python/hello/README.md). There's no player
+client yet; the player endpoint is described in [docs/protocol-v1.md](docs/protocol-v1.md).
 
 To fast-forward the sim while developing, raise the wall-clock tick rate. Sim time per tick stays the same.
 
