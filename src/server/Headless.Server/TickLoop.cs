@@ -2,8 +2,8 @@ using Microsoft.Extensions.Options;
 
 namespace Headless.Server;
 
-/// <summary>Drives the simulation at a fixed wall-clock rate.</summary>
-public sealed class TickLoop(GameHost host, IOptions<GameOptions> options, ILogger<TickLoop> logger) : BackgroundService
+/// <summary>Drives the simulation at a fixed wall-clock rate and sends each tick's snapshots.</summary>
+public sealed class TickLoop(GameHost host, UdpServer udp, IOptions<GameOptions> options, ILogger<TickLoop> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -12,17 +12,24 @@ public sealed class TickLoop(GameHost host, IOptions<GameOptions> options, ILogg
             options.Value.TicksPerSecond, options.Value.Sim.TickSeconds);
 
         using var timer = new PeriodicTimer(interval);
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            try
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                host.Tick();
+                try
+                {
+                    udp.Send(host.Tick(Environment.TickCount64));
+                }
+                catch (Exception ex)
+                {
+                    // A bug in one tick shouldn't take the server down; keep ticking and make noise.
+                    logger.LogError(ex, "Tick failed");
+                }
             }
-            catch (Exception ex)
-            {
-                // A bug in one tick shouldn't take the server down; keep ticking and make noise.
-                logger.LogError(ex, "Tick failed");
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutting down.
         }
     }
 }

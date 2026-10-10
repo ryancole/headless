@@ -1,19 +1,21 @@
 # Hello (Python stock bot)
 
-The smallest possible bot: it connects with a ship token and prints the ship's position every tick.
-See [`hello.py`](hello.py).
+The smallest possible bot: it connects with its ship's bot token and prints the ship's position every
+tick. See [`hello.py`](hello.py).
+
+[`headless_protocol.py`](headless_protocol.py) is the wire protocol in plain Python: encoding, decoding
+and constants. It's a reference implementation for bot authors; copy it or port it to your language.
 
 ## Run it
 
-Requires Python 3.10+. Start the server first (see the repo README), then:
+Requires Python 3.10+, and nothing else (standard library only). Start the server first (see the repo
+README), then:
 
 ```bash
-python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt   # macOS/Linux: .venv/bin/pip
-.venv/Scripts/python hello.py --token dev-token-1
+python hello.py --token dev-token-1
 ```
 
-Options: `--url` (default `ws://localhost:5080/v1/bot`), `--token`. You can also set them with the
-`HEADLESS_URL` and `HEADLESS_TOKEN` environment variables.
+Options: `--host` (default `localhost`), `--port` (default `5080`), `--token`. You can also set them with
+the `HEADLESS_HOST`, `HEADLESS_PORT` and `HEADLESS_TOKEN` environment variables.
 
-The protocol is documented in [`docs/protocol-v1.md`](../../../../docs/protocol-v1.md).
+The protocol is documented in [`docs/protocol.md`](../../../../docs/protocol.md).

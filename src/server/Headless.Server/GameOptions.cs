@@ -4,6 +4,9 @@ namespace Headless.Server;
 
 public sealed class GameOptions
 {
+    /// <summary>UDP port the server listens on (IPv4 and IPv6).</summary>
+    public int Port { get; set; } = 5080;
+
     /// <summary>Wall-clock tick rate. Raise it to fast-forward the sim during development; sim time per tick is <see cref="SimConfig.TickSeconds"/>.</summary>
     public double TicksPerSecond { get; set; } = 2;
 
@@ -20,7 +23,7 @@ public sealed class PlayerSlot
 {
     public string Name { get; set; } = "";
 
-    /// <summary>Lets a player client connect as this player (<c>/v1/player</c>).</summary>
+    /// <summary>Lets a client connect as this player.</summary>
     public string Token { get; set; } = "";
 
     public ShipSlot Ship { get; set; } = new();
@@ -30,6 +33,6 @@ public sealed class ShipSlot
 {
     public string Name { get; set; } = "";
 
-    /// <summary>Lets a bot connect and control this ship (<c>/v1/bot</c>). Separate from the player's token.</summary>
+    /// <summary>Lets a bot connect and control this ship. Separate from the player's token.</summary>
     public string BotToken { get; set; } = "";
 }

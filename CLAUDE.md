@@ -34,7 +34,8 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 ## Tech stack
 
 - **Simulation core**: plain C# class library, deterministic fixed-rate `Tick()` consuming intents, unit tested. No networking. Reused as the local test server.
-- **Server**: ASP.NET Core, hosted service running the tick loop. **Raw WebSockets + JSON** (not SignalR — keep it language-agnostic). OpenAPI spec for any HTTP endpoints.
+- **Server**: .NET generic host (no ASP.NET, no HTTP) with a hosted service running the tick loop.
+- **Protocol** (decided 2026-10-10): **one custom binary protocol over raw UDP for every client — bots and the game client.** No HTTP, WebSocket, JSON or third-party networking library. Spec in `docs/protocol.md`; it must stay simple enough to implement in any language with just a UDP socket (the Python bot uses only the standard library).
 - **Physics** (when needed): BepuPhysics2.
 - **Stock bots**: Python and C# first.
 - **No spectator/viewer for now** (decided 2026-10-10): focus on the game itself. Debug via bot logs and sim tests. Revisit later; no Node/web toolchain until then.
@@ -46,7 +47,7 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 
 1. **Decide the core loop** (mining / trading / hauling — open decision).
 2. **Sim core** library + tests.
-3. **Bot protocol spec** (intents, per-tick sensor snapshot, errors), then the WebSocket endpoint.
+3. **Protocol spec** (intents, per-tick sensor snapshot, errors), then the UDP server.
 4. **First stock bot** — a simple miner in Python and C#. Fix protocol clunkiness now.
 5. Then: accounts, persistence, multiple players, bot library, bot runner. 3D client last.
 
@@ -54,13 +55,13 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 
 ## Status
 
-- **Current focus (2026-10-10): nail down the server first.** Entities: a **player** (id, name) and a **ship** (id, name, `OwnerPlayerId`, position). Every ship has exactly one owner; ownership lives on the ship only, so players have no ship reference (a player's ships are found by owner id). Ships are autonomous and flown by a bot (`/v1/bot`, ship bot token); players connect separately (`/v1/player`, separate player token). **Owning a ship ≠ being aboard it**: players will be able to board ships they don't own, so don't tie a player's location to ownership or add a ship reference on the player. Where a player is aboard is not modelled yet. Each player starts with one ship. Nothing moves ships yet: no velocity, no thrust, no intents; clients can't send anything. The server logs each ship's position, bot status and owner, each second. Mining, stations, fuel, credits, sensors and movement were deliberately removed to keep it simple; add features back one at a time, only when asked.
+- **Current focus (2026-10-10): nail down the server first.** Entities: a **player** (id, name) and a **ship** (id, name, `OwnerPlayerId`, position). Every ship has exactly one owner; ownership lives on the ship only, so players have no ship reference (a player's ships are found by owner id). Ships are autonomous and flown by a bot (connects with role `bot` and the ship's bot token); players connect separately (role `player`, their own player token). **Owning a ship ≠ being aboard it**: players will be able to board ships they don't own, so don't tie a player's location to ownership or add a ship reference on the player. Where a player is aboard is not modelled yet. Each player starts with one ship. Nothing moves ships yet: no velocity, no thrust, no intents; clients send no game commands (only connect/keep-alive/disconnect). The server logs each ship's position, bot status and owner, each second. Mining, stations, fuel, credits, sensors and movement were deliberately removed to keep it simple; add features back one at a time, only when asked.
 - Core loop (mine → haul → sell → refuel) is chosen but deferred; see `docs/core-loop.md`.
-- Built: sim core + tests, protocol v1 (`docs/protocol-v1.md`), WebSocket server, Python stock `hello` bot (connects, prints its ship's position).
-- Layout (monorepo): `src/server/` holds the .NET solution (`Headless.slnx`, `Directory.Build.props`, `Headless.Sim`, `Headless.Protocol`, `Headless.Server`, `Headless.Sim.Tests`); `src/bots/python/hello` is the stock bot; `src/game` is the Godot 4.7.2 (.NET) client project (`Headless.Game.csproj`, net10.0, main scene `Main.tscn`). It's an empty scene and doesn't connect to the server yet. Godot is installed at `C:\Program Files\Godot_v4.7.2-stable_mono_win64\` (use the `_console.exe` for headless runs, e.g. `--headless --path src/game --build-solutions --quit`).
+- Built: sim core, binary UDP protocol (`docs/protocol.md`, `Headless.Protocol`), UDP game server, tests for all three (`Headless.Sim.Tests`, `Headless.Protocol.Tests`, `Headless.Server.Tests`; `GameHost` is pure packets-in/packets-out with an injected clock so it's tested without sockets), Python stock `hello` bot (standard library only; `headless_protocol.py` is the reference implementation).
+- Layout (monorepo): `src/server/` holds the .NET solution (`Headless.slnx`, `Directory.Build.props`, `Headless.Sim`, `Headless.Protocol`, `Headless.Server`, and their `.Tests` projects); `src/bots/python/hello` is the stock bot; `src/game` is the Godot 4.7.2 (.NET) client project (`Headless.Game.csproj`, net10.0, main scene `Main.tscn`). It's an empty scene and doesn't connect to the server yet. Godot is installed at `C:\Program Files\Godot_v4.7.2-stable_mono_win64\` (use the `_console.exe` for headless runs, e.g. `--headless --path src/game --build-solutions --quit`).
 - **Folder convention**: all code goes under `src/`, one folder per component (`src/server`, `src/bots`, `src/game`); scripts (build, run, dev tooling) go under `etc/`; docs live in `docs/`.
 - `dotnet test src/server` runs the tests (solution is `src/server/Headless.slnx`). `dotnet run --project src/server/Headless.Server -- --Game:TicksPerSecond=40` fast-forwards the sim (dev tokens `dev-token-1` and `dev-token-2`).
-- Protocol changes: update `Headless.Protocol/V1`, `ProtocolMapper`, `docs/protocol-v1.md` and the stock bots together.
+- Protocol changes: update `Headless.Protocol` (+ its byte-layout tests), `GameHost`/`ProtocolMapper`, `docs/protocol.md` and `headless_protocol.py` together; bump `ProtocolConstants.Version` for breaking changes.
 
 ## Open questions
 

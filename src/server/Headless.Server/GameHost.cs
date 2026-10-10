@@ -1,22 +1,32 @@
-using Headless.Protocol.V1;
+using System.Net;
+using System.Security.Cryptography;
+using Headless.Protocol;
 using Headless.Sim;
 using Microsoft.Extensions.Options;
 
 namespace Headless.Server;
 
+/// <summary>A packet the server wants sent.</summary>
+public readonly record struct Outgoing(IPEndPoint To, Packet Packet);
+
 /// <summary>
-/// Owns the simulation and the connected clients: at most one bot per ship (it flies the ship) and one
-/// connection per player. All sim access goes through <see cref="_gate"/>; network
-/// I/O happens outside it so a slow client can never stall the tick.
+/// Owns the simulation and the client sessions. Pure game and connection logic: packets come in, packets to send
+/// come out, and the caller supplies the clock, so it can be tested without sockets. Thread-safe: every entry
+/// point takes <see cref="_gate"/>.
 /// </summary>
+/// <remarks>
+/// Sessions: at most one bot per ship (it flies the ship) and one connection per player. A client is identified
+/// by its address plus the random session id handed out on connect, which every later packet must carry.
+/// </remarks>
 public sealed class GameHost
 {
     private readonly Lock _gate = new();
     private readonly Simulation _sim;
     private readonly Dictionary<string, int> _shipIdsByBotToken = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _playerIdsByToken = new(StringComparer.Ordinal);
-    private readonly ClientGroup _bots = new("bot for ship");
-    private readonly ClientGroup _players = new("player");
+    private readonly Dictionary<IPEndPoint, Session> _sessionsByAddress = [];
+    private readonly Dictionary<int, Session> _botsByShip = [];
+    private readonly Dictionary<int, Session> _playersById = [];
     private readonly long _locationLogEveryTicks;
     private readonly ILogger<GameHost> _logger;
 
@@ -42,47 +52,160 @@ public sealed class GameHost
         }
 
         _sim = new Simulation(world);
-        Rules = ProtocolMapper.ToRules(world.Config);
         _locationLogEveryTicks = opts.LocationLogSeconds > 0
             ? Math.Max(1, (long)Math.Round(opts.LocationLogSeconds * opts.TicksPerSecond))
             : 0;
     }
 
-    public GameRules Rules { get; }
-
-    public bool TryGetShipForBotToken(string token, out int shipId) => _shipIdsByBotToken.TryGetValue(token, out shipId);
-    public bool TryGetPlayerForToken(string token, out int playerId) => _playerIdsByToken.TryGetValue(token, out playerId);
-
-    /// <summary>Makes <paramref name="bot"/> the ship's controller, disconnecting any previous one.</summary>
-    public void AttachBot(int shipId, ClientConnection bot) => Attach(_bots, shipId, bot);
-    public void DetachBot(int shipId, ClientConnection bot) => Detach(_bots, shipId, bot);
-
-    /// <summary>Connects <paramref name="client"/> as the player, disconnecting any previous connection for them.</summary>
-    public void AttachPlayer(int playerId, ClientConnection client) => Attach(_players, playerId, client);
-    public void DetachPlayer(int playerId, ClientConnection client) => Detach(_players, playerId, client);
-
-    public void Tick()
+    /// <summary>Handles one datagram. Malformed packets and packets from unknown sessions are silently dropped.</summary>
+    public IReadOnlyList<Outgoing> Receive(IPEndPoint from, ReadOnlySpan<byte> data, long nowMs)
     {
-        var outgoing = new List<(ClientConnection Client, ServerMessage Message)>();
-        List<string>? locationLines = null;
-        long tick;
+        if (!PacketCodec.TryDecode(data, out var packet)) return [];
+
         lock (_gate)
         {
-            _sim.Step();
-            foreach (var (shipId, bot) in _bots.Connections)
-                outgoing.Add((bot, ProtocolMapper.ToSnapshot(_sim.Sense(shipId))));
-            foreach (var (playerId, client) in _players.Connections)
-                outgoing.Add((client, ProtocolMapper.ToPlayerSnapshot(_sim.SensePlayer(playerId))));
+            switch (packet)
+            {
+                case ConnectRequest request:
+                    return Connect(from, request, nowMs);
 
+                case KeepAlive { Session: var id } when FindSession(from, id) is { } session:
+                    session.LastHeardMs = nowMs;
+                    return [];
+
+                case Disconnect { Session: var id } when FindSession(from, id) is { } session:
+                    Remove(session);
+                    _logger.LogInformation("Disconnected: {Session} (client left)", session);
+                    return [];
+
+                default:
+                    return []; // Server-to-client packet types, or a stale or spoofed session.
+            }
+        }
+    }
+
+    /// <summary>Advances the sim one tick, drops timed-out sessions, and returns every client's snapshot.</summary>
+    public IReadOnlyList<Outgoing> Tick(long nowMs)
+    {
+        var outgoing = new List<Outgoing>();
+        List<string>? locationLines = null;
+        long tick;
+
+        lock (_gate)
+        {
+            foreach (var session in _sessionsByAddress.Values.Where(s => nowMs - s.LastHeardMs > (long)ProtocolConstants.Timeout.TotalMilliseconds).ToList())
+            {
+                Remove(session);
+                outgoing.Add(new(session.Address, new Disconnected(session.Id, DisconnectReason.TimedOut)));
+                _logger.LogInformation("Disconnected: {Session} (timed out)", session);
+            }
+
+            _sim.Step();
             tick = _sim.World.Tick;
+
+            foreach (var session in _sessionsByAddress.Values)
+            {
+                Packet snapshot = session.Role switch
+                {
+                    ClientRole.Bot => new ShipSnapshot(session.Id, tick, ProtocolMapper.ToData(_sim.Sense(session.SubjectId).Self)),
+                    _ => new Protocol.PlayerSnapshot(session.Id, tick, _sim.SensePlayer(session.SubjectId).Ships.Select(ProtocolMapper.ToData).ToList()),
+                };
+                outgoing.Add(new(session.Address, snapshot));
+            }
+
             if (_locationLogEveryTicks > 0 && tick % _locationLogEveryTicks == 0)
                 locationLines = DescribeShips();
         }
 
-        foreach (var (client, message) in outgoing) client.Send(message);
-
         foreach (var line in locationLines ?? [])
             _logger.LogInformation("[tick {Tick}] {Ship}", tick, line);
+        return outgoing;
+    }
+
+    /// <summary>Ends every session, e.g. on shutdown, and returns the notices to send.</summary>
+    public IReadOnlyList<Outgoing> DisconnectAll(DisconnectReason reason)
+    {
+        lock (_gate)
+        {
+            var outgoing = _sessionsByAddress.Values.Select(s => new Outgoing(s.Address, new Disconnected(s.Id, reason))).ToList();
+            _sessionsByAddress.Clear();
+            _botsByShip.Clear();
+            _playersById.Clear();
+            return outgoing;
+        }
+    }
+
+    private List<Outgoing> Connect(IPEndPoint from, ConnectRequest request, long nowMs)
+    {
+        if (request.Version != ProtocolConstants.Version)
+            return [new(from, new ConnectDenied(request.Nonce, DenyReason.UnsupportedVersion))];
+
+        if (!TryAuthenticate(request.Role, request.Token, out var subjectId, out var subjectName))
+        {
+            _logger.LogInformation("Denied {Role} connection from {Address}: invalid token", request.Role, from);
+            return [new(from, new ConnectDenied(request.Nonce, DenyReason.InvalidToken))];
+        }
+
+        var outgoing = new List<Outgoing>();
+        if (_sessionsByAddress.TryGetValue(from, out var existing))
+        {
+            // A resend of a request we already accepted (the client hasn't seen our answer yet): answer again.
+            if (existing.Nonce == request.Nonce && existing.Role == request.Role && existing.SubjectId == subjectId)
+            {
+                existing.LastHeardMs = nowMs;
+                return [new(from, Accepted(existing, subjectName))];
+            }
+            // Otherwise the client at this address started over; its old session is gone.
+            Remove(existing);
+            _logger.LogInformation("Disconnected: {Session} (reconnected)", existing);
+        }
+
+        var bySubject = SessionsFor(request.Role);
+        if (bySubject.TryGetValue(subjectId, out var previous))
+        {
+            Remove(previous);
+            outgoing.Add(new(previous.Address, new Disconnected(previous.Id, DisconnectReason.Superseded)));
+            _logger.LogInformation("Disconnected: {Session} (superseded by a new connection)", previous);
+        }
+
+        var session = new Session(from, NewSessionId(), request.Role, subjectId, request.Nonce) { LastHeardMs = nowMs };
+        _sessionsByAddress.Add(from, session);
+        bySubject.Add(subjectId, session);
+        _logger.LogInformation("Connected: {Session}", session);
+
+        outgoing.Add(new(from, Accepted(session, subjectName)));
+        return outgoing;
+    }
+
+    private ConnectAccepted Accepted(Session session, string subjectName) =>
+        new(session.Nonce, session.Id, session.SubjectId, subjectName, (float)_sim.World.Config.TickSeconds);
+
+    private bool TryAuthenticate(ClientRole role, string token, out int subjectId, out string subjectName)
+    {
+        subjectName = "";
+        switch (role)
+        {
+            case ClientRole.Bot when _shipIdsByBotToken.TryGetValue(token, out subjectId):
+                subjectName = _sim.World.Ships[subjectId].Name;
+                return true;
+            case ClientRole.Player when _playerIdsByToken.TryGetValue(token, out subjectId):
+                subjectName = _sim.World.Players[subjectId].Name;
+                return true;
+            default:
+                subjectId = 0;
+                return false;
+        }
+    }
+
+    private Session? FindSession(IPEndPoint from, ulong id) =>
+        _sessionsByAddress.TryGetValue(from, out var session) && session.Id == id ? session : null;
+
+    private Dictionary<int, Session> SessionsFor(ClientRole role) => role == ClientRole.Bot ? _botsByShip : _playersById;
+
+    private void Remove(Session session)
+    {
+        _sessionsByAddress.Remove(session.Address);
+        SessionsFor(session.Role).Remove(session.SubjectId);
     }
 
     /// <summary>One line per ship: where it is, whether its bot is connected, and who owns it.</summary>
@@ -93,25 +216,22 @@ public sealed class GameHost
         {
             var owner = world.Players[ship.OwnerPlayerId];
             return $"ship {ship.Id} '{ship.Name}' at {Format(ship.Position)}, "
-                + $"{(_bots.IsConnected(ship.Id) ? "bot connected" : "no bot")}, "
-                + $"owner: '{owner.Name}' ({(_players.IsConnected(owner.Id) ? "online" : "offline")})";
+                + $"{(_botsByShip.ContainsKey(ship.Id) ? "bot connected" : "no bot")}, "
+                + $"owner: '{owner.Name}' ({(_playersById.ContainsKey(owner.Id) ? "online" : "offline")})";
         }).ToList();
     }
 
-    private void Attach(ClientGroup group, int id, ClientConnection client)
+    /// <summary>A random, non-zero session id. Unguessable, so another host can't inject packets into a session.</summary>
+    private static ulong NewSessionId()
     {
-        ClientConnection? previous;
-        lock (_gate) previous = group.Set(id, client);
-        previous?.Close("superseded by a new connection");
-        _logger.LogInformation("Connected: {Who} {Id}", group.Label, id);
-    }
-
-    private void Detach(ClientGroup group, int id, ClientConnection client)
-    {
-        // A superseded connection must not remove its replacement.
-        bool removed;
-        lock (_gate) removed = group.Remove(id, client);
-        if (removed) _logger.LogInformation("Disconnected: {Who} {Id}", group.Label, id);
+        Span<byte> bytes = stackalloc byte[8];
+        ulong id;
+        do
+        {
+            RandomNumberGenerator.Fill(bytes);
+            id = BitConverter.ToUInt64(bytes);
+        } while (id == 0);
+        return id;
     }
 
     private static void RequireUniqueToken(HashSet<string> tokens, string token, string owner)
@@ -124,26 +244,11 @@ public sealed class GameHost
 
     private static string Format(Vec2 v) => $"({v.X:0.0}, {v.Y:0.0})";
 
-    /// <summary>The live connections of one kind of client, keyed by ship or player id. Guarded by <see cref="_gate"/>.</summary>
-    private sealed class ClientGroup(string label)
+    private sealed record Session(IPEndPoint Address, ulong Id, ClientRole Role, int SubjectId, ulong Nonce)
     {
-        private readonly Dictionary<int, ClientConnection> _connections = [];
+        public long LastHeardMs { get; set; }
 
-        /// <summary>How log lines name a connection, e.g. "bot for ship" 2 or "player" 1.</summary>
-        public string Label { get; } = label;
-        public IEnumerable<KeyValuePair<int, ClientConnection>> Connections => _connections;
-
-        public bool IsConnected(int id) => _connections.ContainsKey(id);
-
-        /// <returns>The connection it replaced, if any.</returns>
-        public ClientConnection? Set(int id, ClientConnection client)
-        {
-            _connections.TryGetValue(id, out var previous);
-            _connections[id] = client;
-            return previous;
-        }
-
-        public bool Remove(int id, ClientConnection client) =>
-            _connections.TryGetValue(id, out var current) && current == client && _connections.Remove(id);
+        public override string ToString() =>
+            $"{(Role == ClientRole.Bot ? "bot for ship" : "player")} {SubjectId} from {Address}";
     }
 }
