@@ -9,7 +9,7 @@ namespace Headless.Server;
 
 /// <summary>One bot's WebSocket. Outgoing messages go through a small bounded queue that drops the oldest
 /// snapshot when the bot falls behind — a slow bot sees fresher state, it never backs up the server.</summary>
-public sealed class BotConnection(int shipId, WebSocket socket, ILogger logger)
+public sealed class BotConnection(int shipId, WebSocket socket)
 {
     private const int MaxMessageBytes = 64 * 1024;
 
@@ -28,11 +28,11 @@ public sealed class BotConnection(int shipId, WebSocket socket, ILogger logger)
         _closed.Cancel();
     }
 
-    public async Task RunAsync(GameHost host, CancellationToken requestAborted)
+    public async Task RunAsync(CancellationToken requestAborted)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted, _closed.Token);
         var send = SendLoopAsync(cts.Token);
-        var receive = ReceiveLoopAsync(host, cts.Token);
+        var receive = ReceiveLoopAsync(cts.Token);
 
         await Task.WhenAny(send, receive);
         await cts.CancelAsync();
@@ -56,7 +56,7 @@ public sealed class BotConnection(int shipId, WebSocket socket, ILogger logger)
         }
     }
 
-    private async Task ReceiveLoopAsync(GameHost host, CancellationToken ct)
+    private async Task ReceiveLoopAsync(CancellationToken ct)
     {
         var buffer = new ArrayBufferWriter<byte>();
         while (!ct.IsCancellationRequested)
@@ -75,32 +75,8 @@ public sealed class BotConnection(int shipId, WebSocket socket, ILogger logger)
                 }
             } while (!result.EndOfMessage);
 
-            Handle(host, buffer.WrittenSpan);
-        }
-    }
-
-    private void Handle(GameHost host, ReadOnlySpan<byte> json)
-    {
-        ClientMessage? message;
-        try
-        {
-            message = JsonSerializer.Deserialize<ClientMessage>(json, ProtocolJson.Options);
-        }
-        catch (JsonException ex)
-        {
-            logger.LogDebug(ex, "Malformed message from ship {ShipId}", ShipId);
-            Send(new ErrorMessage("malformed_message", ex.Message));
-            return;
-        }
-
-        switch (message)
-        {
-            case IntentsMessage { Intents: var intents }:
-                host.Submit(this, intents.Select(ProtocolMapper.ToIntent));
-                break;
-            default:
-                Send(new ErrorMessage("unsupported_message", "Expected a message with \"type\": \"intents\"."));
-                break;
+            // Bots have nothing to send yet; tell them rather than silently dropping it.
+            Send(new ErrorMessage("unsupported_message", "The server doesn't accept messages from bots yet."));
         }
     }
 }

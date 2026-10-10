@@ -3,6 +3,12 @@ using Headless.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.AddSimpleConsole(o =>
+{
+    o.SingleLine = true;
+    o.TimestampFormat = "HH:mm:ss ";
+});
+
 builder.Services.Configure<GameOptions>(builder.Configuration.GetSection("Game"));
 builder.Services.AddSingleton<GameHost>();
 builder.Services.AddHostedService<TickLoop>();
@@ -14,7 +20,7 @@ app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSecond
 app.MapGet("/healthz", () => Results.Ok("ok"));
 
 // Bot protocol v1. Authenticate with "Authorization: Bearer <ship token>". See docs/protocol-v1.md.
-app.Map("/v1/bot", async (HttpContext ctx, GameHost host, ILoggerFactory loggers) =>
+app.Map("/v1/bot", async (HttpContext ctx, GameHost host) =>
 {
     if (!ctx.WebSockets.IsWebSocketRequest)
     {
@@ -32,12 +38,12 @@ app.Map("/v1/bot", async (HttpContext ctx, GameHost host, ILoggerFactory loggers
     }
 
     using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
-    var bot = new BotConnection(shipId, socket, loggers.CreateLogger<BotConnection>());
+    var bot = new BotConnection(shipId, socket);
     host.Attach(bot);
     bot.Send(new HelloMessage("v1", shipId, host.Rules));
     try
     {
-        await bot.RunAsync(host, ctx.RequestAborted);
+        await bot.RunAsync(ctx.RequestAborted);
     }
     finally
     {

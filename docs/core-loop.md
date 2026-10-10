@@ -1,5 +1,8 @@
 # Core loop
 
+> **Deferred (2026-10-10).** The server has been cut back to tracking ship location only. Mining, stations,
+> fuel and credits were removed from the code; this doc records the loop we intend to build on top later.
+
 **Decision (2026-10-10): mine → haul → sell → refuel.**
 
 A ship undocks, flies to an asteroid, mines until its hold is full, flies back to a station, sells the ore,
@@ -19,7 +22,7 @@ buys fuel, and goes again. Credits are the score for now.
 - **It gives humans something to do later.** Mining rigs break, holds need managing, and a laden hauler is
   worth boarding.
 
-## Rules as implemented (v1)
+## Rules as first prototyped (removed for now)
 
 | Thing | Value (defaults in `SimConfig`) |
 |---|---|

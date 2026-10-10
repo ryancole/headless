@@ -14,26 +14,30 @@ public sealed class GameHost
     private readonly Simulation _sim;
     private readonly Dictionary<string, int> _shipIdsByToken = new(StringComparer.Ordinal);
     private readonly Dictionary<int, BotConnection> _bots = [];
+    private readonly long _locationLogEveryTicks;
     private readonly ILogger<GameHost> _logger;
 
     public GameHost(IOptions<GameOptions> options, ILogger<GameHost> logger)
     {
         _logger = logger;
         var opts = options.Value;
-        var world = WorldGenerator.CreateStarterSystem(opts.Seed, opts.Sim);
-        var spawn = world.Stations.Values.First();
+        var world = new World(opts.Sim);
 
-        foreach (var slot in opts.Ships)
+        // Spawn ships 1 km apart along the x axis.
+        foreach (var (slot, index) in opts.Ships.Select((s, i) => (s, i)))
         {
             if (string.IsNullOrWhiteSpace(slot.Token))
                 throw new InvalidOperationException($"Ship '{slot.Name}' has no token configured.");
-            var ship = world.AddShipDocked(slot.Name, spawn);
+            var ship = world.AddShip(slot.Name, new Vec2(index * 1_000, 0));
             _shipIdsByToken.Add(slot.Token, ship.Id);
-            _logger.LogInformation("Spawned ship {ShipId} '{Name}' docked at {Station}", ship.Id, ship.Name, spawn.Name);
+            _logger.LogInformation("Spawned ship {ShipId} '{Name}' at {Position}", ship.Id, ship.Name, Format(ship.Position));
         }
 
         _sim = new Simulation(world);
         Rules = ProtocolMapper.ToRules(world.Config);
+        _locationLogEveryTicks = opts.LocationLogSeconds > 0
+            ? Math.Max(1, (long)Math.Round(opts.LocationLogSeconds * opts.TicksPerSecond))
+            : 0;
     }
 
     public ShipRules Rules { get; }
@@ -57,34 +61,35 @@ public sealed class GameHost
     {
         lock (_gate)
         {
-            // A superseded connection must not release control from its replacement.
+            // A superseded connection must not remove its replacement.
             if (!_bots.TryGetValue(bot.ShipId, out var current) || current != bot) return;
             _bots.Remove(bot.ShipId);
-            _sim.ReleaseControl(bot.ShipId);
         }
-        _logger.LogInformation("Bot disconnected from ship {ShipId}; ship holding course", bot.ShipId);
-    }
-
-    public void Submit(BotConnection bot, IEnumerable<Intent> intents)
-    {
-        lock (_gate)
-        {
-            if (!_bots.TryGetValue(bot.ShipId, out var current) || current != bot) return;
-            foreach (var intent in intents) _sim.Submit(bot.ShipId, intent);
-        }
+        _logger.LogInformation("Bot disconnected from ship {ShipId}", bot.ShipId);
     }
 
     public void Tick()
     {
         List<(BotConnection Bot, SnapshotMessage Snapshot)> outgoing;
+        List<(ShipState State, bool Controlled)>? locations = null;
+        long tick;
         lock (_gate)
         {
-            var reports = _sim.Step();
-            outgoing = _bots.Values
-                .Select(bot => (bot, ProtocolMapper.ToSnapshot(_sim.Sense(bot.ShipId), reports[bot.ShipId])))
-                .ToList();
+            _sim.Step();
+            outgoing = _bots.Values.Select(bot => (bot, ProtocolMapper.ToSnapshot(_sim.Sense(bot.ShipId)))).ToList();
+
+            tick = _sim.World.Tick;
+            if (_locationLogEveryTicks > 0 && tick % _locationLogEveryTicks == 0)
+                locations = _sim.World.Ships.Keys.Select(id => (_sim.Sense(id).Self, _bots.ContainsKey(id))).ToList();
         }
 
         foreach (var (bot, snapshot) in outgoing) bot.Send(snapshot);
+
+        if (locations is null) return;
+        foreach (var (state, controlled) in locations)
+            _logger.LogInformation("[tick {Tick}] ship {ShipId} '{Name}' at {Position} ({Control})",
+                tick, state.Id, state.Name, Format(state.Position), controlled ? "bot connected" : "no bot");
     }
+
+    private static string Format(Vec2 v) => $"({v.X:0.0}, {v.Y:0.0})";
 }

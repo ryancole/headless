@@ -37,7 +37,7 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 - **Server**: ASP.NET Core, hosted service running the tick loop. **Raw WebSockets + JSON** (not SignalR — keep it language-agnostic). OpenAPI spec for any HTTP endpoints.
 - **Physics** (when needed): BepuPhysics2.
 - **Stock bots**: Python and C# first.
-- **2D spectator**: React top-down map (also the main debugging tool).
+- **No spectator/viewer for now** (decided 2026-10-10): focus on the game itself. Debug via bot logs and sim tests. Revisit later; no Node/web toolchain until then.
 - **3D client (later)**: Godot 4 with C#, sharing protocol types / sim library with the server.
 - No custom engine.
 
@@ -47,16 +47,16 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 2. **Sim core** library + tests.
 3. **Bot protocol spec** (intents, per-tick sensor snapshot, errors), then the WebSocket endpoint.
 4. **First stock bot** — a simple miner in Python and C#. Fix protocol clunkiness now.
-5. **2D React spectator view**.
-6. Then: accounts, persistence, multiple players, bot library, bot runner. 3D client last.
+5. Then: accounts, persistence, multiple players, bot library, bot runner. 3D client last.
 
-**First milestone**: one ship, flown by one bot, flies to an asteroid, mines, sells at a station — visible on the 2D map. No 3D, no accounts, no persistence.
+**First milestone**: one ship, flown by one bot, flies to an asteroid, mines, sells at a station. No 3D, no accounts, no persistence.
 
 ## Status
 
-- **Core loop decided**: mine → haul → sell → refuel. See `docs/core-loop.md`.
-- Built: sim core + tests, protocol v1 (`docs/protocol-v1.md`), WebSocket server, Python stock miner. The first milestone runs end to end; the 2D map is next.
-- Layout: `src/Headless.Sim`, `src/Headless.Protocol`, `src/Headless.Server`, `src/Headless.Sim.Tests`, `src/bots/python/miner`.
+- **Current focus (2026-10-10): nail down the server first.** A ship is **only** an id, a name and a position. No velocity, no thrust, no intents; bots can't send anything yet. The server logs every ship's position each second. Mining, stations, fuel, credits, sensors and movement were deliberately removed to keep it simple; add features back one at a time, only when asked.
+- Core loop (mine → haul → sell → refuel) is chosen but deferred; see `docs/core-loop.md`.
+- Built: sim core + tests, protocol v1 (`docs/protocol-v1.md`), WebSocket server, Python stock `hello` bot (connects, prints its ship's position).
+- Layout: `src/Headless.Sim`, `src/Headless.Protocol`, `src/Headless.Server`, `src/Headless.Sim.Tests`, `src/bots/python/hello`.
 - **Folder convention**: all code (projects, tests, bots) goes under `src/`; scripts (build, run, dev tooling) go under `etc/`; docs live in `docs/`.
 - `dotnet test src` runs the tests (solution is `src/Headless.slnx`). `dotnet run --project src/Headless.Server -- --Game:TicksPerSecond=40` fast-forwards the sim (dev tokens `dev-token-1` and `dev-token-2`).
 - Protocol changes: update `Headless.Protocol/V1`, `ProtocolMapper`, `docs/protocol-v1.md` and the stock bots together.
