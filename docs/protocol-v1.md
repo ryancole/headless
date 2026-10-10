@@ -15,7 +15,7 @@ don't own. Which ship a player is aboard isn't part of the protocol yet.
 For now the game is only players and ships with a position. Nothing moves ships, each player starts with
 one ship, and clients can't send any commands yet.
 
-C# wire types live in `src/Headless.Protocol/V1/Messages.cs`.
+C# wire types live in `src/server/Headless.Protocol/V1/Messages.cs`.
 
 ## Connecting
 

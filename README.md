@@ -8,21 +8,21 @@ Right now the server tracks players and their ships. Every ship has a position a
 
 | Path | What |
 |---|---|
-| `src/Headless.Sim` | Simulation core: players, and ships with a position. No networking. |
-| `src/Headless.Protocol` | Bot protocol wire types (v1) and JSON settings. |
-| `src/Headless.Server` | ASP.NET Core host: tick loop and the `/v1/bot` and `/v1/player` WebSockets. |
-| `src/Headless.Sim.Tests` | xUnit tests for the sim. |
+| `src/server/Headless.Sim` | Simulation core: players, and ships with a position. No networking. |
+| `src/server/Headless.Protocol` | Protocol wire types (v1) and JSON settings. |
+| `src/server/Headless.Server` | ASP.NET Core host: tick loop and the `/v1/bot` and `/v1/player` WebSockets. |
+| `src/server/Headless.Sim.Tests` | xUnit tests for the sim. |
 | `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
 | `docs/` | [Core loop](docs/core-loop.md), [protocol v1](docs/protocol-v1.md). |
 
 ## Quick start
 
 ```bash
-dotnet test src
+dotnet test src/server
 ```
 
 ```bash
-dotnet run --project src/Headless.Server
+dotnet run --project src/server/Headless.Server
 ```
 
 The server listens on `http://localhost:5080`. In Development it spawns two players, each owning one
@@ -39,5 +39,5 @@ client yet; the player endpoint is described in [docs/protocol-v1.md](docs/proto
 To fast-forward the sim while developing, raise the wall-clock tick rate. Sim time per tick stays the same.
 
 ```bash
-dotnet run --project src/Headless.Server -- --Game:TicksPerSecond=40
+dotnet run --project src/server/Headless.Server -- --Game:TicksPerSecond=40
 ```
