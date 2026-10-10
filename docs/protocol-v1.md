@@ -18,6 +18,8 @@ Authorization: Bearer <ship token>
 - One connection per ship. A new connection with the same token replaces the old one, and the old one is
   closed with the reason `superseded by a new connection`.
 - Messages over 64 KiB close the connection.
+- When the server shuts down, it closes every bot connection with code **1001** and the reason
+  `server shutting down`. Bots should wait a few seconds and reconnect.
 
 ## Server → bot
 

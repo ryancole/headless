@@ -45,6 +45,9 @@ async def run(url: str, token: str) -> None:
                 pos = ship["position"]
                 log.info("[tick %d] %s is at (%.1f, %.1f)", msg["tick"], ship["name"], pos["x"], pos["y"])
 
+        # The loop ends when the server closes the connection cleanly, e.g. "1001 server shutting down".
+        log.warning("Server closed the connection: %s %s", ws.close_code, ws.close_reason)
+
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Headless stock hello bot")

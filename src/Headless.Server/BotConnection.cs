@@ -17,34 +17,52 @@ public sealed class BotConnection(int shipId, WebSocket socket)
         new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
     private readonly CancellationTokenSource _closed = new();
     private string _closeReason = "closed";
+    private WebSocketCloseStatus _closeStatus = WebSocketCloseStatus.NormalClosure;
 
     public int ShipId { get; } = shipId;
 
     public void Send(ServerMessage message) => _outbox.Writer.TryWrite(message);
 
-    public void Close(string reason)
+    public void Close(string reason, WebSocketCloseStatus status = WebSocketCloseStatus.NormalClosure)
     {
         _closeReason = reason;
+        _closeStatus = status;
         _closed.Cancel();
     }
 
     public async Task RunAsync(CancellationToken requestAborted)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted, _closed.Token);
-        var send = SendLoopAsync(cts.Token);
-        var receive = ReceiveLoopAsync(cts.Token);
+        using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(requestAborted, _closed.Token);
+        var send = SendLoopAsync(sendCts.Token);
+
+        // Close() deliberately doesn't cancel the receive: cancelling a WebSocket receive aborts the socket
+        // without a close frame. Instead we send our close frame below, and the bot's reply ends the loop.
+        var receive = ReceiveLoopAsync(requestAborted);
 
         await Task.WhenAny(send, receive);
-        await cts.CancelAsync();
-        try { await Task.WhenAll(send, receive); }
-        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { }
+        await sendCts.CancelAsync();
+        await Quietly(send);
 
         if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, _closeReason, timeout.Token); }
-            catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { }
+            try
+            {
+                await socket.CloseOutputAsync(_closeStatus, _closeReason, timeout.Token);
+                await receive.WaitAsync(timeout.Token);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or WebSocketException)
+            {
+                socket.Abort(); // The bot didn't finish the close handshake in time.
+            }
         }
+        await Quietly(receive);
+    }
+
+    private static async Task Quietly(Task task)
+    {
+        try { await task; }
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { }
     }
 
     private async Task SendLoopAsync(CancellationToken ct)
