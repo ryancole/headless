@@ -39,6 +39,7 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 - **Stock bots**: Python and C# first.
 - **No spectator/viewer for now** (decided 2026-10-10): focus on the game itself. Debug via bot logs and sim tests. Revisit later; no Node/web toolchain until then.
 - **3D client (later)**: Godot 4 with C#, sharing protocol types / sim library with the server.
+- **Art style**: 0x10c prototype / Halo: CE look — chunky bevelled sci-fi interiors, muted grey-green world with saturated accents, dark rooms lit by a few hard-shadowed lights, glowing pixel-sharp screens. **Follow `docs/art-style.md` for any client visuals.**
 - No custom engine.
 
 ## Build order

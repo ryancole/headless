@@ -14,7 +14,7 @@ Right now the server tracks players and their ships. Every ship has a position a
 | `src/server/Headless.Sim.Tests` | xUnit tests for the sim. |
 | `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
 | `src/game` | Godot 4 (C#) game client. An empty scene for now. |
-| `docs/` | [Core loop](docs/core-loop.md), [protocol v1](docs/protocol-v1.md). |
+| `docs/` | [Core loop](docs/core-loop.md), [protocol v1](docs/protocol-v1.md), [art style](docs/art-style.md). |
 
 ## Quick start
 
