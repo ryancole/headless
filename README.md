@@ -13,6 +13,7 @@ Right now the server tracks players and their ships. Every ship has a position a
 | `src/server/Headless.Server` | ASP.NET Core host: tick loop and the `/v1/bot` and `/v1/player` WebSockets. |
 | `src/server/Headless.Sim.Tests` | xUnit tests for the sim. |
 | `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
+| `src/game` | Godot 4 (C#) game client. An empty scene for now. |
 | `docs/` | [Core loop](docs/core-loop.md), [protocol v1](docs/protocol-v1.md). |
 
 ## Quick start
@@ -33,11 +34,16 @@ ship (set in `appsettings.Development.json`):
 | Player One | `dev-player-1` | Prospector | `dev-token-1` |
 | Player Two | `dev-player-2` | Wildcat | `dev-token-2` |
 
-Then start a bot by following [src/bots/python/hello](src/bots/python/hello/README.md). There's no player
-client yet; the player endpoint is described in [docs/protocol-v1.md](docs/protocol-v1.md).
+Then start a bot by following [src/bots/python/hello](src/bots/python/hello/README.md). The game client
+doesn't connect as a player yet; the player endpoint is described in [docs/protocol-v1.md](docs/protocol-v1.md).
 
 To fast-forward the sim while developing, raise the wall-clock tick rate. Sim time per tick stays the same.
 
 ```bash
 dotnet run --project src/server/Headless.Server -- --Game:TicksPerSecond=40
 ```
+
+## Game client
+
+The client is a Godot 4.7 (.NET edition) project in `src/game`. Open `src/game/project.godot` in the Godot
+editor and press Play. It doesn't connect to the server yet.
