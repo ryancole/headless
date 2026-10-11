@@ -34,14 +34,6 @@ public partial class ShipInterior : Node3D
     private readonly Material _metal = Matte(new Color(0.25f, 0.27f, 0.28f), metallic: 0.5f); // consoles, reactor
     private readonly Material _crate = Matte(new Color(0.38f, 0.4f, 0.28f));
     private readonly Material _orange = Matte(new Color(0.85f, 0.4f, 0.1f));
-    private readonly Material _shaft = new StandardMaterial3D
-    {
-        // Fake light shaft: a faint additive cone under a lamp. Back faces culled, so it vanishes when you stand in it.
-        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-        BlendMode = BaseMaterial3D.BlendModeEnum.Add,
-        AlbedoColor = new Color(1, 0.95f, 0.85f, 0.05f),
-    };
 
     private static readonly Color Cyan = new(0.3f, 0.8f, 1), Green = new(0.4f, 1, 0.5f);
 
@@ -95,8 +87,11 @@ public partial class ShipInterior : Node3D
         Block(new(-open, 0, front - proud), new(-DoorWidth / 2, DoorHeight, back + proud), _trim);
         Block(new(DoorWidth / 2, 0, front - proud), new(open, DoorHeight, back + proud), _trim);
         Block(new(-open, DoorHeight, front - proud), new(open, top, back + proud), _trim);
-        foreach (var face in new[] { front - 0.02f, back + 0.02f })
+        foreach (var (face, side, yaw) in new[] { (front - 0.02f, -1, 0f), (back + 0.02f, 1, 180f) })
+        {
             Box(new(0, top + 0.15f, face), new(DoorWidth, 0.08f, 0.04f), Glow(Green), solid: false);
+            PanelLight(new(0, top + 0.15f, face + side * 0.05f), yaw, Green, energy: 0.3f, range: 2.5f);
+        }
     }
 
     private void FurnishCockpit()
@@ -104,11 +99,13 @@ public partial class ShipInterior : Node3D
         var r = Cockpit;
         // Console along the bow wall: a desk, three monitors above it and a row of small blue lights.
         Box(new(0, 0.5f, r.Fore + 0.4f), new(3.6f, 1, 0.8f), _metal);
-        // The middle monitor is the command log; the other two are plain glowing panels for now.
+        // The middle monitor is the command log, mostly dark so it gives off less light; the other two are plain
+        // glowing panels for now. Each casts its own light into the cockpit.
         for (var i = -1; i <= 1; i++)
         {
             Box(new(i * 1.1f, 1.75f, r.Fore + 0.05f), new(1, 0.75f, 0.1f), _metal);
             if (i != 0) Box(new(i * 1.1f, 1.75f, r.Fore + 0.11f), new(0.86f, 0.62f, 0.02f), Glow(Cyan), solid: false);
+            PanelLight(new(i * 1.1f, 1.75f, r.Fore + 0.16f), yaw: 180, Cyan, energy: i == 0 ? 0.15f : 0.5f, range: 4);
         }
         CommandLog = new CommandLogScreen { Position = new(0, 1.75f, r.Fore + 0.105f) };
         AddChild(CommandLog);
@@ -136,9 +133,10 @@ public partial class ShipInterior : Node3D
         // Wall terminal on the port side.
         Box(new(-r.HalfWidth + 0.06f, 1.5f, -2), new(0.12f, 0.8f, 1.1f), _metal);
         Box(new(-r.HalfWidth + 0.13f, 1.5f, -2), new(0.02f, 0.6f, 0.9f), Glow(Cyan), solid: false);
+        PanelLight(new(-r.HalfWidth + 0.18f, 1.5f, -2), yaw: -90, Cyan, energy: 0.3f, range: 3);
 
-        Lamp(new(0, 0, r.Fore + 2.5f), LampWhite, energy: 1, range: 7, shaft: true);
-        Lamp(new(0, 0, r.Aft - 2.5f), LampWhite, energy: 1, range: 7, shaft: true);
+        Lamp(new(0, 0, r.Fore + 2.5f), LampWhite, energy: 1, range: 7);
+        Lamp(new(0, 0, r.Aft - 2.5f), LampWhite, energy: 1, range: 7);
     }
 
     private void FurnishEngineRoom()
@@ -152,10 +150,16 @@ public partial class ShipInterior : Node3D
         foreach (var y in new[] { 0.8f, 1.6f, 2.4f })
             Cylinder(reactor with { Y = y }, radius: 1.04f, height: 0.12f, Glow(Cyan), solid: false);
 
-        // Dim orange working light in the corners, and the reactor's own glow (unshadowed, it would shadow itself).
+        // The bands light the room all the way round: a ring of lights just off the drum, each shining outward.
+        for (var yaw = 0f; yaw < 360; yaw += 90)
+        {
+            var outward = Vector3.Forward.Rotated(Vector3.Up, Mathf.DegToRad(yaw));
+            PanelLight(reactor + outward * 1.1f, yaw, Cyan, energy: 0.8f, range: 5);
+        }
+
+        // Dim orange working light in the corners.
         Lamp(new(-r.HalfWidth + 1, 0, r.Fore + 1), EngineOrange, energy: 0.8f, range: 6);
         Lamp(new(r.HalfWidth - 1, 0, r.Aft - 1), EngineOrange, energy: 0.8f, range: 6);
-        AddChild(new OmniLight3D { Position = reactor with { Z = r.Fore + 1.3f }, LightColor = Cyan, LightEnergy = 0.5f, OmniRange = 3.5f });
     }
 
     /// <summary>Structural ribs every 2 m along both side walls.</summary>
@@ -166,32 +170,58 @@ public partial class ShipInterior : Node3D
             Box(new(side * (r.HalfWidth - 0.075f), Height / 2, z), new(0.15f, Height, 0.25f), _trim);
     }
 
-    /// <summary>A ceiling lamp over <paramref name="at"/> (x, z) with a shadowed point light just below it.</summary>
-    private void Lamp(Vector3 at, Color color, float energy, float range, bool shaft = false)
+    /// <summary>
+    /// A ceiling lamp over <paramref name="at"/> (x, z): a shadowed spotlight pointing at the floor, whose light
+    /// scatters in the volumetric fog (Main.tscn) as a real shaft that anything standing in it shadows, and a shadowed
+    /// point light that lights the rest of the room but leaves the fog alone (so the shaft keeps its edges).
+    /// </summary>
+    private void Lamp(Vector3 at, Color color, float energy, float range)
     {
         Box(new(at.X, Height - 0.05f, at.Z), new(0.8f, 0.1f, 0.8f), _metal, solid: false);
         Box(new(at.X, Height - 0.11f, at.Z), new(0.6f, 0.02f, 0.6f), Glow(color, energy: 4), solid: false);
-        AddChild(new OmniLight3D
+        var position = new Vector3(at.X, Height - 0.13f, at.Z);
+        AddChild(new SpotLight3D
         {
-            Position = new(at.X, Height - 0.4f, at.Z),
+            Position = position,
+            RotationDegrees = new(-90, 0, 0), // Straight down.
             LightColor = color,
             LightEnergy = energy,
-            OmniRange = range,
+            SpotRange = Height + 1,
+            SpotAngle = 35,
+            SpotAngleAttenuation = 0.5f, // A crisp edge to the cone.
+            LightVolumetricFogEnergy = 6,
             ShadowEnabled = true,
             ShadowBlur = 0.5f, // Fairly hard-edged.
         });
-        if (shaft)
+        AddChild(new OmniLight3D
         {
-            const float length = Height - 0.12f;
-            AddChild(new MeshInstance3D
-            {
-                Mesh = new CylinderMesh { TopRadius = 0.3f, BottomRadius = 0.9f, Height = length },
-                MaterialOverride = _shaft,
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                Position = new(at.X, length / 2, at.Z),
-            });
-        }
+            Position = position with { Y = Height - 0.4f },
+            LightColor = color,
+            LightEnergy = energy * 0.7f,
+            OmniRange = range,
+            LightVolumetricFogEnergy = 0,
+            ShadowEnabled = true,
+            ShadowBlur = 0.5f,
+        });
     }
+
+    /// <summary>
+    /// The light from a glowing screen or strip, which its emissive material doesn't give off by itself: a dim,
+    /// shadowed spotlight just in front of it, shining out over the hemisphere it faces. <paramref name="yaw"/> turns
+    /// it from facing the bow (-Z) to the left, in degrees (180 faces the stern, -90 faces starboard).
+    /// </summary>
+    private void PanelLight(Vector3 at, float yaw, Color color, float energy, float range) => AddChild(new SpotLight3D
+    {
+        Position = at,
+        RotationDegrees = new(0, yaw, 0),
+        LightColor = color,
+        LightEnergy = energy,
+        SpotRange = range,
+        SpotAngle = 85,
+        LightVolumetricFogEnergy = 0.5f,
+        ShadowEnabled = true,
+        ShadowBlur = 0.5f,
+    });
 
     private void Block(Vector3 min, Vector3 max, Material material) => Box((min + max) / 2, max - min, material);
 

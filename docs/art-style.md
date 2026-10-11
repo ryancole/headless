@@ -57,9 +57,13 @@ Mojang's images, so they're described here rather than committed:
   shadows from railings, crates and held items).
 - Very low ambient light. No fill light that flattens the room.
 - **Glow (bloom) on**, so light sources and screens bloom slightly.
-- **Fake light shafts**: bright, unshaded, additive wedge meshes under hatches and lamps, as in screenshot 4.
-  A light volumetric fog is optional, but the meshes are the look.
-- Emissive materials for screens, indicator lights and lamps.
+- **Light shafts** from volumetric fog, as in screenshot 4: a thin haze that only lights up where a shadowed
+  light shines through it, so shafts under hatches and lamps are real and anything in them (crates, the player)
+  shadows them. Ceiling lamps are a narrow downward `SpotLight3D` for the shaft plus a point light for the room
+  that leaves the fog alone (`LightVolumetricFogEnergy = 0`), so the shaft keeps its edges.
+- Emissive materials for screens, indicator lights and lamps. Emission doesn't light anything, so each screen
+  or light strip also gets a dim, shadowed spotlight in its colour, just in front of it and shining out over the
+  side it faces; round glowing things (the reactor's bands) get a ring of them facing outward.
 
 ## Screens
 
@@ -80,8 +84,8 @@ Mojang's images, so they're described here rather than committed:
 ## Godot settings to start from
 
 - Renderer: Forward+.
-- `WorldEnvironment`: very low ambient light, glow enabled, a filmic-style tonemap, no auto-exposure. Keep SSAO
-  off or subtle (grime is in the textures).
+- `WorldEnvironment`: very low ambient light, glow enabled, a filmic-style tonemap, no auto-exposure, a thin
+  volumetric fog (no ambient inject). Keep SSAO off or subtle (grime is in the textures).
 - Lights: shadows on, low blur. Positional shadow atlas sized for a handful of shadowed lights per room.
 - Anti-aliasing: MSAA 2× or 4×. The edges should be crisp, not smeared.
 - Camera: a field of view around 70–75°.
