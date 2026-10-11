@@ -40,6 +40,7 @@ Related games for reference: SpaceTraders (API-only, no first-party client), Scr
 - **Stock bots**: Python and C# first.
 - **No spectator/viewer for now** (decided 2026-10-10): focus on the game itself. Debug via bot logs and sim tests. Revisit later; no Node/web toolchain until then.
 - **3D client (later)**: Godot 4 with C#, sharing protocol types / sim library with the server.
+- **Godot conventions**: write for **Godot 4.7** (the installed 4.7.2), using its current APIs and idioms, not Godot 3 or early-4.x patterns from older tutorials (e.g. `partial` node classes, `[Export]` properties, `SignalName`/`MethodName` constants, `.uid` files committed beside scripts, scene format 3). When unsure an API exists or what it's called in 4.7, check the 4.7 docs (docs.godotengine.org/en/4.7) or the built `GodotSharp.dll` instead of guessing.
 - **Art style**: 0x10c prototype / Halo: CE look — chunky bevelled sci-fi interiors, muted grey-green world with saturated accents, dark rooms lit by a few hard-shadowed lights, glowing pixel-sharp screens. **Follow `docs/art-style.md` for any client visuals.**
 - No custom engine.
 
