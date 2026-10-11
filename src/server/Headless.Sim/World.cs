@@ -20,13 +20,28 @@ public sealed class World(SimConfig config)
         return player;
     }
 
-    /// <summary>Adds a ship owned by <paramref name="owner"/>, who must already be in this world.</summary>
+    /// <summary>
+    /// Adds a ship owned by <paramref name="owner"/>, who must already be in this world. It starts at rest, pointing
+    /// along +x, fitted with an engine (device 0) and a gyroscope (device 1).
+    /// </summary>
     public Ship AddShip(string name, Vec2 position, Player owner)
     {
         if (!_players.TryGetValue(owner.Id, out var known) || known != owner)
             throw new ArgumentException($"Player {owner.Id} is not in this world.", nameof(owner));
 
-        var ship = new Ship { Id = _nextId++, Name = name, OwnerPlayerId = owner.Id, Position = position };
+        var ship = new Ship
+        {
+            Id = _nextId++,
+            Name = name,
+            OwnerPlayerId = owner.Id,
+            Mass = Config.ShipMass,
+            Devices =
+            [
+                new Device { Kind = DeviceKind.Engine, Rating = Config.EngineThrust },
+                new Device { Kind = DeviceKind.Gyroscope, Rating = Config.GyroscopeTurnRate },
+            ],
+            Position = position,
+        };
         _ships.Add(ship.Id, ship);
         return ship;
     }

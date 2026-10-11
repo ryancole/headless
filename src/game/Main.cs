@@ -44,7 +44,8 @@ public partial class Main : Node3D
         };
         _connection.PlayerSnapshotReceived += snapshot =>
             GD.Print($"[tick {snapshot.Tick}] " + string.Join(", ",
-                snapshot.Ships.Select(ship => $"ship {ship.Id} at ({ship.X:0.0}, {ship.Y:0.0})")));
+                snapshot.Ships.Select(ship => $"ship {ship.Id} at ({ship.X:0.0}, {ship.Y:0.0}), "
+                    + $"heading {Mathf.RadToDeg(ship.Heading):0} deg, {new Vector2((float)ship.VelocityX, (float)ship.VelocityY).Length():0.0} m/s")));
     }
 
     // Polled from the main thread: no receive thread or queue needed, and handlers can touch the scene tree.

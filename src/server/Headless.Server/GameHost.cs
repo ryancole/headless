@@ -78,8 +78,12 @@ public sealed class GameHost
                     _logger.LogInformation("Disconnected: {Session} (client left)", session);
                     return [];
 
+                case Protocol.DeviceCommand command when FindSession(from, command.Session) is { Role: ClientRole.Bot } session:
+                    session.LastHeardMs = nowMs;
+                    return [new(from, new CommandAck(session.Id, command.Sequence, Apply(session, command)))];
+
                 default:
-                    return []; // Server-to-client packet types, or a stale or spoofed session.
+                    return []; // Server-to-client packet types, a stale or spoofed session, or a player sending commands.
             }
         }
     }
@@ -107,7 +111,7 @@ public sealed class GameHost
             {
                 Packet snapshot = session.Role switch
                 {
-                    ClientRole.Bot => new ShipSnapshot(session.Id, tick, ProtocolMapper.ToData(_sim.Sense(session.SubjectId).Self)),
+                    ClientRole.Bot => ProtocolMapper.ToPacket(session.Id, _sim.Sense(session.SubjectId)),
                     _ => new Protocol.PlayerSnapshot(session.Id, tick, _sim.SensePlayer(session.SubjectId).Ships.Select(ProtocolMapper.ToData).ToList()),
                 };
                 outgoing.Add(new(session.Address, snapshot));
@@ -177,6 +181,20 @@ public sealed class GameHost
         return outgoing;
     }
 
+    /// <summary>
+    /// Applies a bot's command unless it's a resend or arrived after a newer one for the same device. Commands only
+    /// set values, so the newest per device is all that matters, and a lost ack just means the bot resends.
+    /// </summary>
+    private CommandResult Apply(Session session, Protocol.DeviceCommand command)
+    {
+        if (session.LastSequenceByDevice.TryGetValue(command.Device, out var last) && command.Sequence <= last)
+            return CommandResult.Stale;
+
+        var outcome = _sim.Command(session.SubjectId, command.Device, (Sim.DeviceCommand)command.Command, command.Value);
+        if (outcome == CommandOutcome.Ok) session.LastSequenceByDevice[command.Device] = command.Sequence;
+        return ProtocolMapper.ToResult(outcome);
+    }
+
     private ConnectAccepted Accepted(Session session, string subjectName) =>
         new(session.Nonce, session.Id, session.SubjectId, subjectName, (float)_sim.World.Config.TickSeconds);
 
@@ -216,6 +234,7 @@ public sealed class GameHost
         {
             var owner = world.Players[ship.OwnerPlayerId];
             return $"ship {ship.Id} '{ship.Name}' at {Format(ship.Position)}, "
+                + $"heading {ship.Heading * 180 / Math.PI:0}°, speed {ship.Velocity.Length:0.0} m/s, "
                 + $"{(_botsByShip.ContainsKey(ship.Id) ? "bot connected" : "no bot")}, "
                 + $"owner: '{owner.Name}' ({(_playersById.ContainsKey(owner.Id) ? "online" : "offline")})";
         }).ToList();
@@ -247,6 +266,9 @@ public sealed class GameHost
     private sealed record Session(IPEndPoint Address, ulong Id, ClientRole Role, int SubjectId, ulong Nonce)
     {
         public long LastHeardMs { get; set; }
+
+        /// <summary>Bots only: the sequence number of the last command applied to each device.</summary>
+        public Dictionary<byte, uint> LastSequenceByDevice { get; } = [];
 
         public override string ToString() =>
             $"{(Role == ClientRole.Bot ? "bot for ship" : "player")} {SubjectId} from {Address}";

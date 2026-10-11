@@ -2,17 +2,17 @@
 
 An online space game played by bots. You write the code that flies your ship; the server decides what happens.
 
-Right now the server tracks players and their ships. Every ship has a position and an owner (a player), and is flown by a bot. Bots and players connect over a small binary UDP protocol and receive a snapshot each tick; the server logs where every ship is and who owns it.
+Right now the server tracks players and their ships. Every ship has an owner (a player) and is flown by a bot, which steers it by setting the ship's devices: an engine and a gyroscope, with Newtonian physics on a 2D plane. Bots and players connect over a small binary UDP protocol and receive a snapshot each tick; the server logs where every ship is, where it's heading and who owns it.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/server/Headless.Sim` | Simulation core: players, and ships with a position. No networking. |
+| `src/server/Headless.Sim` | Simulation core: players, ships, devices and movement. No networking. |
 | `src/server/Headless.Protocol` | The binary UDP protocol: packet types and encoder/decoder. |
 | `src/server/Headless.Server` | The game server: tick loop and UDP socket (port 5080). |
 | `src/server/Headless.*.Tests` | xUnit tests for the sim, protocol and server. |
-| `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
+| `src/bots/python/hello` | Python stock bot that flies its ship to a point and stops there. |
 | `src/game` | Godot 4 (C#) game client: walk around inside a ship in first person; connects as a player. |
 | `docs/` | [Core loop](docs/core-loop.md), [protocol](docs/protocol.md), [art style](docs/art-style.md). |
 
@@ -62,13 +62,15 @@ command line after `--`. To run it headless, e.g. as Player Two:
 `-- --screenshot=out.png` saves a PNG of the first second and quits, handy for checking visuals without
 playing.
 
-To build and start the server (in its own window) and the game together:
+To build and start everything together: the server and the Python bot (each in its own window, the bot
+flying Prospector to `500,300`) and the game:
 
 ```bash
 pwsh etc/run.ps1
 ```
 
-Arguments are passed on to the game, e.g. `pwsh etc/run.ps1 --token=dev-player-2`.
+`-BotTarget x,y` picks where the bot flies and `-NoBot` skips it. Other arguments are passed on to the game,
+e.g. `pwsh etc/run.ps1 -NoBot --token=dev-player-2`.
 
 The networking lives in `src/game/ServerConnection.cs`, which doesn't depend on Godot; `Main.cs` drives it
 from `_Process`.

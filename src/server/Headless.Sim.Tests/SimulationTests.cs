@@ -2,6 +2,9 @@ namespace Headless.Sim.Tests;
 
 public class SimulationTests
 {
+    // Device indexes on a standard ship (see World.AddShip).
+    private const int Engine = 0, Gyroscope = 1;
+
     private static (World World, Player Player, Ship Ship) WorldWithPlayerAndShip(Vec2 shipPosition)
     {
         var world = new World(new SimConfig());
@@ -51,7 +54,7 @@ public class SimulationTests
     }
 
     [Fact]
-    public void Ship_snapshot_reports_position_and_owner()
+    public void Ship_snapshot_reports_position_owner_and_devices()
     {
         var (world, player, ship) = WorldWithPlayerAndShip(new Vec2(5, 6));
         var sim = new Simulation(world);
@@ -60,7 +63,106 @@ public class SimulationTests
         var snapshot = sim.Sense(ship.Id);
 
         Assert.Equal(1, snapshot.Tick);
-        Assert.Equal(new ShipState(ship.Id, "s", player.Id, new Vec2(5, 6)), snapshot.Self);
+        Assert.Equal(new ShipState(ship.Id, "s", player.Id, new Vec2(5, 6), Vec2.Zero, 0), snapshot.Self);
+        Assert.Equal(10_000, snapshot.Mass);
+        Assert.Equal([new DeviceState(DeviceKind.Engine, 20_000, 0), new DeviceState(DeviceKind.Gyroscope, 0.5, 0)], snapshot.Devices);
+    }
+
+    [Fact]
+    public void The_engine_accelerates_the_ship_along_its_heading()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+
+        Assert.Equal(CommandOutcome.Ok, sim.Command(ship.Id, Engine, DeviceCommand.Set, 1));
+        sim.Step(); // 20 kN on 10 t for 0.5 s: +1 m/s, then moves 0.5 m
+        sim.Step();
+
+        Assert.Equal(new Vec2(2, 0), ship.Velocity);
+        Assert.Equal(new Vec2(1.5, 0), ship.Position);
+    }
+
+    [Fact]
+    public void Ships_coast_when_the_engine_stops()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+        sim.Command(ship.Id, Engine, DeviceCommand.Set, 1);
+        sim.Step();
+
+        sim.Command(ship.Id, Engine, DeviceCommand.Set, 0);
+        sim.Step();
+        sim.Step();
+
+        Assert.Equal(new Vec2(1, 0), ship.Velocity);
+        Assert.Equal(new Vec2(1.5, 0), ship.Position);
+    }
+
+    [Fact]
+    public void The_gyroscope_turns_the_ship_and_the_heading_wraps()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+
+        sim.Command(ship.Id, Gyroscope, DeviceCommand.Set, -1); // clockwise at 0.5 rad/s
+        for (var i = 0; i < 14; i++) sim.Step();                // 7 s: -3.5 rad, past -π
+
+        Assert.Equal(2 * Math.PI - 3.5, ship.Heading, precision: 9);
+    }
+
+    [Fact]
+    public void Thrust_follows_the_heading()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+        sim.Command(ship.Id, Gyroscope, DeviceCommand.Set, 1);
+        sim.Command(ship.Id, Engine, DeviceCommand.Set, 1);
+
+        sim.Step(); // turns 0.25 rad, then thrusts that way
+
+        Assert.Equal(Math.Cos(0.25), ship.Velocity.X, precision: 9);
+        Assert.Equal(Math.Sin(0.25), ship.Velocity.Y, precision: 9);
+    }
+
+    [Theory]
+    [InlineData(Engine, 2.0, 1.0)]
+    [InlineData(Engine, -1.0, 0.0)] // engines don't run backwards
+    [InlineData(Gyroscope, -3.0, -1.0)]
+    public void Settings_are_clamped_to_the_device_range(int device, double value, double expected)
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+
+        Assert.Equal(CommandOutcome.Ok, new Simulation(world).Command(ship.Id, device, DeviceCommand.Set, value));
+        Assert.Equal(expected, ship.Devices[device].Setting);
+    }
+
+    [Fact]
+    public void Bad_commands_are_rejected_and_change_nothing()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+
+        Assert.Equal(CommandOutcome.UnknownDevice, sim.Command(ship.Id, 2, DeviceCommand.Set, 1));
+        Assert.Equal(CommandOutcome.UnknownDevice, sim.Command(ship.Id, -1, DeviceCommand.Set, 1));
+        Assert.Equal(CommandOutcome.UnknownCommand, sim.Command(ship.Id, Engine, (DeviceCommand)99, 1));
+        Assert.Equal(CommandOutcome.InvalidValue, sim.Command(ship.Id, Engine, DeviceCommand.Set, double.NaN));
+        Assert.Equal(CommandOutcome.InvalidValue, sim.Command(ship.Id, Engine, DeviceCommand.Set, double.PositiveInfinity));
+        Assert.All(ship.Devices, d => Assert.Equal(0, d.Setting));
+    }
+
+    [Fact]
+    public void Each_ship_gets_a_command_budget_per_tick()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+
+        for (var i = 0; i < world.Config.CommandsPerTick; i++)
+            Assert.Equal(CommandOutcome.Ok, sim.Command(ship.Id, Engine, DeviceCommand.Set, 0.5));
+        Assert.Equal(CommandOutcome.OverBudget, sim.Command(ship.Id, Engine, DeviceCommand.Set, 1));
+        Assert.Equal(0.5, ship.Devices[Engine].Setting);
+
+        sim.Step();
+        Assert.Equal(CommandOutcome.Ok, sim.Command(ship.Id, Engine, DeviceCommand.Set, 1));
     }
 
     [Fact]

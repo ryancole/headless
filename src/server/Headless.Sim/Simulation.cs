@@ -1,17 +1,54 @@
 namespace Headless.Sim;
 
 /// <summary>
-/// The authoritative, deterministic game loop. For now ships only have a position and nothing moves them,
-/// so a tick just advances the clock. Not thread-safe: the host must serialize calls.
+/// The authoritative, deterministic game loop. Bots set their ships' devices with <see cref="Command"/>; each
+/// <see cref="Step"/> turns and pushes every ship by its devices' settings (Newtonian, no drag) and moves it.
+/// Not thread-safe: the host must serialize calls.
 /// </summary>
 public sealed class Simulation(World world)
 {
     public World World { get; } = world;
 
     /// <summary>Advances the world by one tick.</summary>
-    public void Step() => World.Tick++;
+    public void Step()
+    {
+        var dt = World.Config.TickSeconds;
+        foreach (var ship in World.Ships.Values)
+        {
+            // Turn first, then thrust along the new heading. Semi-implicit Euler: velocity first, then position.
+            var turnRate = ship.Devices.Where(d => d.Kind == DeviceKind.Gyroscope).Sum(d => d.Output);
+            ship.Heading = WrapAngle(ship.Heading + turnRate * dt);
 
-    public SensorSnapshot Sense(int shipId) => new(World.Tick, ShipStateOf(World.Ships[shipId]));
+            var thrust = ship.Devices.Where(d => d.Kind == DeviceKind.Engine).Sum(d => d.Output);
+            ship.Velocity += Vec2.FromAngle(ship.Heading) * (thrust / ship.Mass * dt);
+            ship.Position += ship.Velocity * dt;
+
+            ship.CommandsThisTick = 0;
+        }
+        World.Tick++;
+    }
+
+    /// <summary>A bot's command to one of its ship's devices. Takes effect from the next <see cref="Step"/>.</summary>
+    public CommandOutcome Command(int shipId, int deviceIndex, DeviceCommand command, double value)
+    {
+        var ship = World.Ships[shipId];
+        if (deviceIndex < 0 || deviceIndex >= ship.Devices.Count) return CommandOutcome.UnknownDevice;
+        if (command != DeviceCommand.Set) return CommandOutcome.UnknownCommand;
+        if (!double.IsFinite(value)) return CommandOutcome.InvalidValue;
+        if (ship.CommandsThisTick >= World.Config.CommandsPerTick) return CommandOutcome.OverBudget;
+
+        ship.CommandsThisTick++;
+        var device = ship.Devices[deviceIndex];
+        device.Setting = Math.Clamp(value, device.MinSetting, 1);
+        return CommandOutcome.Ok;
+    }
+
+    public SensorSnapshot Sense(int shipId)
+    {
+        var ship = World.Ships[shipId];
+        var devices = ship.Devices.Select(d => new DeviceState(d.Kind, d.Rating, d.Setting)).ToList();
+        return new SensorSnapshot(World.Tick, ShipStateOf(ship), ship.Mass, devices);
+    }
 
     public PlayerSnapshot SensePlayer(int playerId)
     {
@@ -20,5 +57,9 @@ public sealed class Simulation(World world)
         return new PlayerSnapshot(World.Tick, new PlayerState(player.Id, player.Name), ships);
     }
 
-    private static ShipState ShipStateOf(Ship ship) => new(ship.Id, ship.Name, ship.OwnerPlayerId, ship.Position);
+    private static ShipState ShipStateOf(Ship ship) =>
+        new(ship.Id, ship.Name, ship.OwnerPlayerId, ship.Position, ship.Velocity, ship.Heading);
+
+    /// <summary>Wraps an angle into [-π, π).</summary>
+    private static double WrapAngle(double angle) => angle - 2 * Math.PI * Math.Floor((angle + Math.PI) / (2 * Math.PI));
 }

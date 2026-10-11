@@ -43,7 +43,8 @@ public class GameHostTests
         Assert.Equal((77UL, 2, "Prospector", 0.5f), (accepted.Nonce, accepted.SubjectId, accepted.SubjectName, accepted.TickSeconds));
         Assert.NotEqual(0UL, accepted.Session);
         var snapshot = Assert.IsType<ShipSnapshot>(Assert.Single(sent).Packet);
-        Assert.Equal(new ShipSnapshot(accepted.Session, 1, new ShipData(2, 1, 0, 0)), snapshot);
+        Assert.Equal(new ShipSnapshot(accepted.Session, 1, new ShipData(2, 1, 0, 0, 0, 0, 0), 10_000,
+            [new DeviceData(DeviceKind.Engine, 20_000, 0), new DeviceData(DeviceKind.Gyroscope, 0.5, 0)]), snapshot);
     }
 
     [Fact]
@@ -55,7 +56,7 @@ public class GameHostTests
         var snapshot = Assert.IsType<PlayerSnapshot>(Assert.Single(host.Tick(0)).Packet);
 
         Assert.Equal((3, "Player Two"), (accepted.SubjectId, accepted.SubjectName));
-        Assert.Equal([new ShipData(4, 3, 1_000, 0)], snapshot.Ships);
+        Assert.Equal([new ShipData(4, 3, 1_000, 0, 0, 0, 0)], snapshot.Ships);
     }
 
     [Theory]
@@ -182,6 +183,94 @@ public class GameHostTests
         Assert.Contains(new Outgoing(Alice, new Disconnected(bot.Session, DisconnectReason.ServerShutdown)), sent);
         Assert.Contains(new Outgoing(Bob, new Disconnected(player.Session, DisconnectReason.ServerShutdown)), sent);
         Assert.Empty(host.Tick(0));
+    }
+
+    private static CommandResult Command(GameHost host, IPEndPoint from, ulong session, uint sequence, byte device, double value)
+    {
+        var reply = Assert.Single(Send(host, from, new DeviceCommand(session, sequence, device, DeviceCommands.Set, value)));
+        var ack = Assert.IsType<CommandAck>(reply.Packet);
+        Assert.Equal((session, sequence), (ack.Session, ack.Sequence));
+        return ack.Result;
+    }
+
+    private static ShipSnapshot BotSnapshot(GameHost host) => Assert.IsType<ShipSnapshot>(Assert.Single(host.Tick(0)).Packet);
+
+    [Fact]
+    public void A_bot_flies_its_ship_with_device_commands()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+
+        Assert.Equal(CommandResult.Ok, Command(host, Alice, bot.Session, 1, device: 0, value: 1));
+        var snapshot = BotSnapshot(host);
+
+        Assert.Equal(1, snapshot.Devices[0].Setting);
+        Assert.Equal(1, snapshot.Ship.VelocityX); // 20 kN on 10 t for 0.5 s
+    }
+
+    [Fact]
+    public void Resent_and_out_of_order_commands_are_stale()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+
+        Assert.Equal(CommandResult.Ok, Command(host, Alice, bot.Session, 2, device: 0, value: 0.5));
+        Assert.Equal(CommandResult.Stale, Command(host, Alice, bot.Session, 2, device: 0, value: 0.5)); // resent
+        Assert.Equal(CommandResult.Stale, Command(host, Alice, bot.Session, 1, device: 0, value: 1));   // arrived late
+        Assert.Equal(CommandResult.Ok, Command(host, Alice, bot.Session, 1, device: 1, value: 1));      // other device
+
+        Assert.Equal([0.5, 1], BotSnapshot(host).Devices.Select(d => d.Setting));
+    }
+
+    [Fact]
+    public void Rejected_commands_say_why_and_can_be_resent()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+
+        Assert.Equal(CommandResult.UnknownDevice, Command(host, Alice, bot.Session, 1, device: 7, value: 1));
+        Assert.Equal(CommandResult.InvalidValue, Command(host, Alice, bot.Session, 2, device: 0, value: double.NaN));
+        for (uint i = 3; i < 7; i++) Assert.Equal(CommandResult.Ok, Command(host, Alice, bot.Session, i, device: 1, value: 0));
+        Assert.Equal(CommandResult.OverBudget, Command(host, Alice, bot.Session, 7, device: 0, value: 1));
+
+        host.Tick(0);
+        Assert.Equal(CommandResult.Ok, Command(host, Alice, bot.Session, 7, device: 0, value: 1)); // the same command, next tick
+    }
+
+    [Fact]
+    public void Unknown_command_codes_get_an_answer()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+
+        var reply = Assert.Single(Send(host, Alice, new DeviceCommand(bot.Session, 1, 0, 99, 1)));
+
+        Assert.Equal(new CommandAck(bot.Session, 1, CommandResult.UnknownCommand), reply.Packet);
+    }
+
+    [Fact]
+    public void Commands_from_players_or_strangers_are_ignored()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+        var player = Connect(host, Bob, ClientRole.Player, "p1");
+
+        Assert.Empty(Send(host, Bob, new DeviceCommand(player.Session, 1, 0, DeviceCommands.Set, 1)));    // players don't fly
+        Assert.Empty(Send(host, Bob, new DeviceCommand(bot.Session, 1, 0, DeviceCommands.Set, 1)));       // wrong address
+        Assert.Empty(Send(host, Alice, new DeviceCommand(bot.Session + 1, 1, 0, DeviceCommands.Set, 1))); // wrong session
+
+        Assert.Equal(0, ((ShipSnapshot)host.Tick(0).Single(o => o.To.Equals(Alice)).Packet).Devices[0].Setting);
+    }
+
+    [Fact]
+    public void Commands_keep_the_session_open()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1", nowMs: 0);
+
+        Send(host, Alice, new DeviceCommand(bot.Session, 1, 0, DeviceCommands.Set, 0), nowMs: 4_000);
+
+        Assert.IsType<ShipSnapshot>(Assert.Single(host.Tick(8_000)).Packet);
     }
 
     [Fact]

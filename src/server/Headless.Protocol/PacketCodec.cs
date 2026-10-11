@@ -36,6 +36,14 @@ public static class PacketCodec
                 w.U8((byte)PacketType.Disconnect);
                 w.U64(p.Session);
                 break;
+            case DeviceCommand p:
+                w.U8((byte)PacketType.DeviceCommand);
+                w.U64(p.Session);
+                w.U32(p.Sequence);
+                w.U8(p.Device);
+                w.U8(p.Command);
+                w.F64(p.Value);
+                break;
             case ConnectAccepted p:
                 w.U8((byte)PacketType.ConnectAccepted);
                 w.U64(p.Nonce);
@@ -54,6 +62,15 @@ public static class PacketCodec
                 w.U64(p.Session);
                 w.I64(p.Tick);
                 w.Ship(p.Ship);
+                w.F64(p.Mass);
+                if (p.Devices.Count > byte.MaxValue) throw new ArgumentException("Too many devices.", nameof(packet));
+                w.U8((byte)p.Devices.Count);
+                foreach (var device in p.Devices)
+                {
+                    w.U8((byte)device.Kind);
+                    w.F64(device.Rating);
+                    w.F64(device.Setting);
+                }
                 break;
             case PlayerSnapshot p:
                 w.U8((byte)PacketType.PlayerSnapshot);
@@ -67,6 +84,12 @@ public static class PacketCodec
                 w.U8((byte)PacketType.Disconnected);
                 w.U64(p.Session);
                 w.U8((byte)p.Reason);
+                break;
+            case CommandAck p:
+                w.U8((byte)PacketType.CommandAck);
+                w.U64(p.Session);
+                w.U32(p.Sequence);
+                w.U8((byte)p.Result);
                 break;
             default:
                 throw new ArgumentException($"Unknown packet {packet.GetType().Name}.", nameof(packet));
@@ -93,11 +116,13 @@ public static class PacketCodec
                     : null,
                 PacketType.KeepAlive => new KeepAlive(r.U64()),
                 PacketType.Disconnect => new Disconnect(r.U64()),
+                PacketType.DeviceCommand => new DeviceCommand(r.U64(), r.U32(), r.U8(), r.U8(), r.F64()),
                 PacketType.ConnectAccepted => new ConnectAccepted(r.U64(), r.U64(), r.I32(), r.String(), r.F32()),
                 PacketType.ConnectDenied => new ConnectDenied(r.U64(), r.Enum<DenyReason>()),
-                PacketType.ShipSnapshot => new ShipSnapshot(r.U64(), r.I64(), r.Ship()),
+                PacketType.ShipSnapshot => ReadShipSnapshot(ref r),
                 PacketType.PlayerSnapshot => ReadPlayerSnapshot(ref r),
                 PacketType.Disconnected => new Disconnected(r.U64(), r.Enum<DisconnectReason>()),
+                PacketType.CommandAck => new CommandAck(r.U64(), r.U32(), r.Enum<CommandResult>()),
                 _ => null,
             };
         }
@@ -112,6 +137,17 @@ public static class PacketCodec
             return false;
         }
         return true;
+    }
+
+    private static ShipSnapshot ReadShipSnapshot(ref Reader r)
+    {
+        var session = r.U64();
+        var tick = r.I64();
+        var ship = r.Ship();
+        var mass = r.F64();
+        var devices = new DeviceData[r.U8()];
+        for (var i = 0; i < devices.Length; i++) devices[i] = new DeviceData(r.Enum<DeviceKind>(), r.F64(), r.F64());
+        return new ShipSnapshot(session, tick, ship, mass, devices);
     }
 
     private static PlayerSnapshot ReadPlayerSnapshot(ref Reader r)
@@ -155,6 +191,9 @@ public static class PacketCodec
             I32(s.OwnerPlayerId);
             F64(s.X);
             F64(s.Y);
+            F64(s.VelocityX);
+            F64(s.VelocityY);
+            F64(s.Heading);
         }
 
         private Span<byte> Take(int count)
@@ -197,7 +236,7 @@ public static class PacketCodec
             catch (ArgumentException) { throw new MalformedPacketException(); }
         }
 
-        public ShipData Ship() => new(I32(), I32(), F64(), F64());
+        public ShipData Ship() => new(I32(), I32(), F64(), F64(), F64(), F64(), F64());
 
         private ReadOnlySpan<byte> Take(int count)
         {

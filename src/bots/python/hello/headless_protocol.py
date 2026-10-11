@@ -13,13 +13,16 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 MAGIC = 0x534C4448  # b"HDLS" read as a little-endian u32
-VERSION = 1
+VERSION = 2
 MAX_PACKET_SIZE = 1200
 MAX_STRING_BYTES = 255
 
-KEEP_ALIVE_INTERVAL = 1.0     # seconds between keep-alives
-TIMEOUT = 5.0                 # give up after hearing nothing for this long
-CONNECT_RETRY_INTERVAL = 0.5  # resend the connect request this often while waiting
+KEEP_ALIVE_INTERVAL = 1.0      # seconds between keep-alives
+TIMEOUT = 5.0                  # give up after hearing nothing for this long
+CONNECT_RETRY_INTERVAL = 0.5   # resend the connect request this often while waiting
+COMMAND_RETRY_INTERVAL = 0.25  # resend a device command this often until it's acknowledged
+
+SET = 1  # the only device command so far: set the device's setting to the value
 
 
 class PacketType(IntEnum):
@@ -27,12 +30,14 @@ class PacketType(IntEnum):
     CONNECT_REQUEST = 0x01
     KEEP_ALIVE = 0x02
     DISCONNECT = 0x03
+    DEVICE_COMMAND = 0x04
     # Server -> client
     CONNECT_ACCEPTED = 0x81
     CONNECT_DENIED = 0x82
     SHIP_SNAPSHOT = 0x83
     PLAYER_SNAPSHOT = 0x84
     DISCONNECTED = 0x85
+    COMMAND_ACK = 0x86
 
 
 class ClientRole(IntEnum):
@@ -51,12 +56,36 @@ class DisconnectReason(IntEnum):
     TIMED_OUT = 3
 
 
+class DeviceKind(IntEnum):
+    ENGINE = 1     # rating: newtons at full throttle; setting 0..1; pushes along the heading
+    GYROSCOPE = 2  # rating: radians/second at full; setting -1..1; positive turns counter-clockwise
+
+
+class CommandResult(IntEnum):
+    OK = 1
+    STALE = 2           # this command, or a newer one for the same device, was already applied
+    UNKNOWN_DEVICE = 3
+    UNKNOWN_COMMAND = 4
+    INVALID_VALUE = 5   # NaN or infinite
+    OVER_BUDGET = 6     # the ship's command budget for this tick is used up; resend it
+
+
 @dataclass(frozen=True)
 class Ship:
     id: int
     owner_player_id: int
-    x: float
+    x: float          # metres
     y: float
+    vx: float         # metres per second
+    vy: float
+    heading: float    # radians: 0 is +x, counter-clockwise, in [-pi, pi)
+
+
+@dataclass(frozen=True)
+class Device:
+    kind: DeviceKind
+    rating: float     # what the device does at a setting of 1
+    setting: float    # where it's set now
 
 
 @dataclass(frozen=True)
@@ -79,6 +108,8 @@ class ShipSnapshot:
     session: int
     tick: int
     ship: Ship
+    mass: float                  # kilograms
+    devices: tuple[Device, ...]  # a device command addresses a device by its index here
 
 
 @dataclass(frozen=True)
@@ -94,9 +125,17 @@ class Disconnected:
     reason: DisconnectReason
 
 
-ServerPacket = ConnectAccepted | ConnectDenied | ShipSnapshot | PlayerSnapshot | Disconnected
+@dataclass(frozen=True)
+class CommandAck:
+    session: int
+    sequence: int
+    result: CommandResult
 
-_SHIP = struct.Struct("<iidd")  # id, owner_player_id, x, y
+
+ServerPacket = ConnectAccepted | ConnectDenied | ShipSnapshot | PlayerSnapshot | Disconnected | CommandAck
+
+_SHIP = struct.Struct("<iiddddd")  # id, owner_player_id, x, y, vx, vy, heading
+_DEVICE = struct.Struct("<Bdd")    # kind, rating, setting
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +152,10 @@ def encode_keep_alive(session: int) -> bytes:
 
 def encode_disconnect(session: int) -> bytes:
     return struct.pack("<BQ", PacketType.DISCONNECT, session)
+
+
+def encode_device_command(session: int, sequence: int, device: int, command: int, value: float) -> bytes:
+    return struct.pack("<BQIBBd", PacketType.DEVICE_COMMAND, session, sequence, device, command, value)
 
 
 def _string(value: str) -> bytes:
@@ -150,6 +193,10 @@ class _Reader:
     def ship(self) -> Ship:
         return Ship(*self.take(_SHIP))
 
+    def device(self) -> Device:
+        kind, rating, setting = self.take(_DEVICE)
+        return Device(DeviceKind(kind), rating, setting)
+
 
 def decode(data: bytes) -> ServerPacket | None:
     """Decodes a server packet. Returns None for anything malformed or unknown; just drop those."""
@@ -168,13 +215,18 @@ def decode(data: bytes) -> ServerPacket | None:
             packet = ConnectDenied(nonce, DenyReason(reason))
         elif kind == PacketType.SHIP_SNAPSHOT:
             session, tick = r.take("Qq")
-            packet = ShipSnapshot(session, tick, r.ship())
+            ship = r.ship()
+            mass, count = r.take("dB")
+            packet = ShipSnapshot(session, tick, ship, mass, tuple(r.device() for _ in range(count)))
         elif kind == PacketType.PLAYER_SNAPSHOT:
             session, tick, count = r.take("QqH")
             packet = PlayerSnapshot(session, tick, tuple(r.ship() for _ in range(count)))
         elif kind == PacketType.DISCONNECTED:
             session, reason = r.take("QB")
             packet = Disconnected(session, DisconnectReason(reason))
+        elif kind == PacketType.COMMAND_ACK:
+            session, sequence, result = r.take("QIB")
+            packet = CommandAck(session, sequence, CommandResult(result))
         else:
             return None
     except ValueError:  # truncated, bad UTF-8, or an unknown enum value

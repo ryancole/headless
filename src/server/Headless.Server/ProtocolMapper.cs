@@ -3,8 +3,24 @@ using Headless.Sim;
 
 namespace Headless.Server;
 
-/// <summary>Translates sim types to wire types.</summary>
+/// <summary>Translates between sim types and wire types.</summary>
 public static class ProtocolMapper
 {
-    public static ShipData ToData(ShipState s) => new(s.Id, s.OwnerPlayerId, s.Position.X, s.Position.Y);
+    public static ShipData ToData(ShipState s) =>
+        new(s.Id, s.OwnerPlayerId, s.Position.X, s.Position.Y, s.Velocity.X, s.Velocity.Y, s.Heading);
+
+    public static DeviceData ToData(DeviceState d) => new((Protocol.DeviceKind)d.Kind, d.Rating, d.Setting);
+
+    public static Protocol.ShipSnapshot ToPacket(ulong session, SensorSnapshot s) =>
+        new(session, s.Tick, ToData(s.Self), s.Mass, s.Devices.Select(ToData).ToList());
+
+    public static CommandResult ToResult(CommandOutcome outcome) => outcome switch
+    {
+        CommandOutcome.Ok => CommandResult.Ok,
+        CommandOutcome.UnknownDevice => CommandResult.UnknownDevice,
+        CommandOutcome.UnknownCommand => CommandResult.UnknownCommand,
+        CommandOutcome.InvalidValue => CommandResult.InvalidValue,
+        CommandOutcome.OverBudget => CommandResult.OverBudget,
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null),
+    };
 }

@@ -8,12 +8,16 @@ public class PacketCodecTests
         new ConnectRequest(ProtocolConstants.Version, ClientRole.Player, 42, ""),
         new KeepAlive(0xFEEDFACECAFEBEEF),
         new Disconnect(7),
+        new DeviceCommand(99, 3, 1, DeviceCommands.Set, -0.25),
         new ConnectAccepted(42, 99, 2, "Prospector", 0.5f),
         new ConnectDenied(42, DenyReason.InvalidToken),
-        new ShipSnapshot(99, 1234, new ShipData(2, 1, -1.5, 1000.25)),
-        new PlayerSnapshot(99, 1234, [new ShipData(2, 1, 0, 0), new ShipData(4, 1, 5, -6)]),
+        new ShipSnapshot(99, 1234, new ShipData(2, 1, -1.5, 1000.25, 3, -4, 1.5), 10_000,
+            [new DeviceData(DeviceKind.Engine, 20_000, 1), new DeviceData(DeviceKind.Gyroscope, 0.5, -0.5)]),
+        new ShipSnapshot(99, 1, new ShipData(2, 1, 0, 0, 0, 0, 0), 1, []),
+        new PlayerSnapshot(99, 1234, [new ShipData(2, 1, 0, 0, 0, 0, 0), new ShipData(4, 1, 5, -6, 7, 8, -3)]),
         new PlayerSnapshot(99, 1, []),
         new Disconnected(99, DisconnectReason.ServerShutdown),
+        new CommandAck(99, 3, CommandResult.OverBudget),
     ];
 
     [Theory]
@@ -40,13 +44,13 @@ public class PacketCodecTests
     [Fact]
     public void Connect_request_has_the_documented_layout()
     {
-        var bytes = PacketCodec.Encode(new ConnectRequest(1, ClientRole.Player, 0x0807060504030201, "ab"));
+        var bytes = PacketCodec.Encode(new ConnectRequest(2, ClientRole.Player, 0x0807060504030201, "ab"));
 
         byte[] expected =
         [
             0x01,                                           // type
             (byte)'H', (byte)'D', (byte)'L', (byte)'S',     // magic
-            0x01, 0x00,                                     // version (u16 LE)
+            0x02, 0x00,                                     // version (u16 LE)
             0x02,                                           // role: player
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // nonce (u64 LE)
             0x02, (byte)'a', (byte)'b',                     // token: length + UTF-8
@@ -55,12 +59,40 @@ public class PacketCodecTests
     }
 
     [Fact]
-    public void Ship_snapshot_is_41_bytes()
+    public void Device_command_has_the_documented_layout()
     {
-        var bytes = PacketCodec.Encode(new ShipSnapshot(1, 2, new ShipData(3, 4, 5, 6)));
+        var bytes = PacketCodec.Encode(new DeviceCommand(0x0807060504030201, 0x0D0C0B0A, 1, DeviceCommands.Set, 0.5));
 
-        Assert.Equal(1 + 8 + 8 + (4 + 4 + 8 + 8), bytes.Length);
+        byte[] expected =
+        [
+            0x04,                                           // type
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // session (u64 LE)
+            0x0A, 0x0B, 0x0C, 0x0D,                         // sequence (u32 LE)
+            0x01,                                           // device index
+            0x01,                                           // command: set
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F, // value: 0.5 (f64 LE)
+        ];
+        Assert.Equal(expected, bytes);
+    }
+
+    [Fact]
+    public void Ship_snapshot_with_two_devices_is_108_bytes()
+    {
+        var bytes = PacketCodec.Encode(new ShipSnapshot(1, 2, new ShipData(3, 4, 5, 6, 7, 8, 9), 10,
+            [new DeviceData(DeviceKind.Engine, 1, 0), new DeviceData(DeviceKind.Gyroscope, 1, 0)]));
+
+        Assert.Equal(1 + 8 + 8 + (4 + 4 + 5 * 8) + 8 + 1 + 2 * (1 + 8 + 8), bytes.Length);
         Assert.Equal((byte)PacketType.ShipSnapshot, bytes[0]);
+    }
+
+    [Fact]
+    public void Unknown_device_kinds_are_rejected()
+    {
+        var bytes = PacketCodec.Encode(new ShipSnapshot(1, 2, new ShipData(3, 4, 5, 6, 7, 8, 9), 10,
+            [new DeviceData(DeviceKind.Engine, 1, 0)]));
+        bytes[^17] = 99; // the device's kind byte
+
+        Assert.False(PacketCodec.TryDecode(bytes, out _));
     }
 
     [Fact]
@@ -102,7 +134,7 @@ public class PacketCodecTests
     [Fact]
     public void Oversized_packets_are_rejected_both_ways()
     {
-        var tooManyShips = Enumerable.Range(0, 60).Select(i => new ShipData(i, 1, 0, 0)).ToArray();
+        var tooManyShips = Enumerable.Range(0, 25).Select(i => new ShipData(i, 1, 0, 0, 0, 0, 0)).ToArray();
 
         Assert.Throws<ArgumentException>(() => PacketCodec.Encode(new PlayerSnapshot(1, 1, tooManyShips)));
         Assert.False(PacketCodec.TryDecode(new byte[ProtocolConstants.MaxPacketSize + 1], out _));

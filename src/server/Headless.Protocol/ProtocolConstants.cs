@@ -6,7 +6,7 @@ public static class ProtocolConstants
     public const uint Magic = 0x534C4448;
 
     /// <summary>Bumped on any breaking change to the wire format. The server denies versions it doesn't speak.</summary>
-    public const ushort Version = 1;
+    public const ushort Version = 2;
 
     /// <summary>Largest packet either side sends or accepts. Stays under typical internet MTUs to avoid fragmentation.</summary>
     public const int MaxPacketSize = 1200;
@@ -19,6 +19,9 @@ public static class ProtocolConstants
 
     /// <summary>Either side drops the connection after hearing nothing for this long.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>How often a bot resends a <see cref="DeviceCommand"/> that hasn't been acknowledged yet.</summary>
+    public static readonly TimeSpan CommandRetryInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>How often a client resends <see cref="ConnectRequest"/> while waiting for an answer.</summary>
     public static readonly TimeSpan ConnectRetryInterval = TimeSpan.FromMilliseconds(500);

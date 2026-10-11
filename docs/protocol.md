@@ -12,8 +12,8 @@ Every ship has exactly one owner, a player (`owner_player_id`). A player's ships
 them as owner. Owning a ship and being aboard one are separate: players will be able to board ships they
 don't own. Which ship a player is aboard isn't part of the protocol yet.
 
-For now the game is only players and ships with a position. Nothing moves ships, each player starts with
-one ship, and clients don't send any game commands yet.
+For now the game is only players and ships. Each player starts with one ship, and a bot flies it by
+setting the ship's **devices** (see [Devices](#devices)). Players don't send game commands yet.
 
 Implementations:
 
@@ -42,6 +42,8 @@ client                                   server
   │                                        │
   │◀──────── ShipSnapshot / PlayerSnapshot │   every tick (2/s by default), unreliable
   │── KeepAlive (session) ────────────────▶│   every 1 s
+  │── DeviceCommand (session, seq, ...) ──▶│   bots only; resend every 0.25 s until acked
+  │◀──────── CommandAck (session, seq, ok) │
   │                                        │
   │── Disconnect (session) ───────────────▶│   client leaves, or
   │◀──────── Disconnected (session, reason)│   server ends it
@@ -57,7 +59,8 @@ client                                   server
    of order. Each carries the tick number; ignore any older than the newest you've seen.
 4. **Staying alive.** Clients send `KeepAlive` every second. Either side gives up after **5 seconds** of
    silence: the server sends `Disconnected(timed_out)`, and clients should treat a silent server as gone.
-5. **Ending.** A client sends `Disconnect` when it leaves. The server sends `Disconnected` with a reason:
+5. **Commands.** Bots fly their ship with `DeviceCommand`s; see [Devices](#devices).
+6. **Ending.** A client sends `Disconnect` when it leaves. The server sends `Disconnected` with a reason:
    - `server_shutdown`: sent (twice) when the server stops. Wait a few seconds and reconnect.
    - `superseded`: another connection logged in with the same token. Only one bot per ship and one
      connection per player is allowed; the newest wins.
@@ -65,6 +68,60 @@ client                                   server
 
 The two kinds of token are separate on purpose: a player can hand their ship's bot token to a bot without
 giving it their own. A bot token used with the player role, or vice versa, is denied.
+
+## Devices
+
+A ship is fitted with **devices**, the ship's hardware, a bit like the hardware on 0x10c's DCPU-16. Every
+ship snapshot lists them, and a bot addresses one by its index in that list. Ships can be fitted
+differently, so a bot should look for the devices it needs rather than assume indexes. Today every ship has
+an engine (index 0) and a gyroscope (index 1).
+
+Every device has one **setting**, which stays where the bot put it until the bot changes it, and a
+**rating**: what the device does at a setting of 1.
+
+| Kind | Code | Setting | Rating | What it does |
+|---|---|---|---|---|
+| engine | `1` | 0 to 1 | newtons at full throttle | pushes the ship forward, along its heading |
+| gyroscope | `2` | -1 to 1 | radians per second at full | turns the ship; positive is counter-clockwise |
+
+The world is a 2D plane. Each tick (`tick_seconds` of simulated time, 0.5 s by default) the server turns
+every ship by its gyroscope, then accelerates it along its new heading by engine thrust ÷ mass, then moves
+it by its velocity. There's no drag: a ship keeps moving until it thrusts the other way, and since engines
+only push forward, stopping means turning round and burning. Headings are radians: 0 points along +x,
+counter-clockwise, in [-π, π).
+
+### Commands
+
+A `DeviceCommand` names a device, a **command** code and a value. There's one command so far:
+
+| Command | Code | Value |
+|---|---|---|
+| set | `1` | the new setting; values outside the device's range are clamped |
+
+Commands take effect from the next tick. Each ship accepts at most **4 commands per tick**: competition is
+about good decisions, not many.
+
+UDP can drop a command, so commands are made reliable like this:
+
+- Each command carries a **sequence number**, counting up from 1 within a session.
+- The server answers every copy it receives with a `CommandAck` carrying the same sequence number.
+- The bot resends a command every **0.25 s** until the ack arrives.
+- Commands only set values, so the newest per device is all that counts. The server ignores a command if
+  it has already applied that one, or a newer one for the same device, and answers `stale`. A bot with a
+  new value for a device just sends a new command and stops resending the old one.
+
+`CommandAck` results:
+
+| Result | Code | Meaning |
+|---|---|---|
+| `ok` | `1` | applied |
+| `stale` | `2` | already applied, or a newer command for this device was; nothing changed |
+| `unknown_device` | `3` | no device at that index |
+| `unknown_command` | `4` | that device doesn't know that command |
+| `invalid_value` | `5` | NaN or infinite |
+| `over_budget` | `6` | this tick's commands are used up; keep resending and it'll fit next tick |
+
+Only bots send commands. The server ignores them from players.
 
 ## Packets
 
@@ -76,7 +133,7 @@ giving it their own. A bot token used with the player role, or vice versa, is de
 |---|---|---|
 | type | u8 | `0x01` |
 | magic | u32 | `0x534C4448` (the bytes `H D L S`) |
-| version | u16 | protocol version, currently `1` |
+| version | u16 | protocol version, currently `2` |
 | role | u8 | `1` bot, `2` player |
 | nonce | u64 | random, chosen by the client |
 | token | string | the ship's bot token (bots) or the player's token (players) |
@@ -84,12 +141,29 @@ giving it their own. A bot token used with the player role, or vice versa, is de
 For example, a player connecting with nonce `0x0807060504030201` and token `ab`:
 
 ```
-01  48 44 4C 53  01 00  02  01 02 03 04 05 06 07 08  02 61 62
+01  48 44 4C 53  02 00  02  01 02 03 04 05 06 07 08  02 61 62
 ```
 
 **`0x02` KeepAlive**: `type u8`, `session u64`.
 
 **`0x03` Disconnect**: `type u8`, `session u64`.
+
+**`0x04` DeviceCommand** (bots only, 23 bytes)
+
+| Field | Type | Notes |
+|---|---|---|
+| type | u8 | `0x04` |
+| session | u64 | |
+| sequence | u32 | counts up from 1 within a session |
+| device | u8 | index into the ship snapshot's device list |
+| command | u8 | `1` set |
+| value | f64 | |
+
+For example, session `0x0807060504030201`, sequence `0x0D0C0B0A`, set device 1 to 0.5:
+
+```
+04  01 02 03 04 05 06 07 08  0A 0B 0C 0D  01  01  00 00 00 00 00 00 E0 3F
+```
 
 ### Server → client
 
@@ -106,14 +180,18 @@ For example, a player connecting with nonce `0x0807060504030201` and token `ab`:
 
 **`0x82` ConnectDenied**: `type u8`, `nonce u64`, `reason u8`: `1` unsupported version, `2` invalid token.
 
-**`0x83` ShipSnapshot** (to bots, 41 bytes): `type u8`, `session u64`, `tick i64`, then one **ship**.
+**`0x83` ShipSnapshot** (to bots): `type u8`, `session u64`, `tick i64`, then one **ship**, `mass f64`
+(kilograms), `count u8`, then `count` **device**s. 108 bytes with today's two devices.
 
 **`0x84` PlayerSnapshot** (to players): `type u8`, `session u64`, `tick i64`, `count u16`, then `count`
-**ship**s: every ship the player owns. At most 49 ships fit in one packet.
+**ship**s: every ship the player owns. At most 24 ships fit in one packet.
 
 **`0x85` Disconnected**: `type u8`, `session u64`, `reason u8`: `1` server shutdown, `2` superseded, `3` timed out.
 
-A **ship** is 24 bytes:
+**`0x86` CommandAck**: `type u8`, `session u64`, `sequence u32` (echoed from the command), `result u8` (see
+[Commands](#commands)).
+
+A **ship** is 48 bytes:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -121,6 +199,17 @@ A **ship** is 24 bytes:
 | owner_player_id | i32 | |
 | x | f64 | metres |
 | y | f64 | metres, on a 2D plane |
+| vx | f64 | metres per second |
+| vy | f64 | metres per second |
+| heading | f64 | radians: 0 is +x, counter-clockwise, in [-π, π) |
+
+A **device** is 17 bytes:
+
+| Field | Type | Notes |
+|---|---|---|
+| kind | u8 | `1` engine, `2` gyroscope |
+| rating | f64 | what it does at a setting of 1 (see [Devices](#devices)) |
+| setting | f64 | where it's set now |
 
 Players and ships share one id space, so a player id and a ship id never collide.
 
@@ -132,7 +221,5 @@ don't know.
 
 ## Not yet
 
-- **Reliable delivery for client commands.** Clients don't send game commands yet. When they do (intents),
-  they'll need acknowledgements or redundancy, since UDP can drop them.
 - **Encryption.** Tokens travel in plain text. Fine on a local network for development, but not for a public
   server.
