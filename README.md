@@ -55,5 +55,13 @@ command line after `--`. To run it headless, e.g. as Player Two:
 "C:\Program Files\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --headless --path src/game -- --token=dev-player-2
 ```
 
+To build and start the server (in its own window) and the game together:
+
+```bash
+pwsh etc/run.ps1
+```
+
+Arguments are passed on to the game, e.g. `pwsh etc/run.ps1 --token=dev-player-2`.
+
 The networking lives in `src/game/ServerConnection.cs`, which doesn't depend on Godot; `Main.cs` drives it
 from `_Process`.
