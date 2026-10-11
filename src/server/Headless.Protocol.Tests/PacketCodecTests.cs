@@ -18,6 +18,12 @@ public class PacketCodecTests
         new PlayerSnapshot(99, 1, []),
         new Disconnected(99, DisconnectReason.ServerShutdown),
         new CommandAck(99, 3, CommandResult.OverBudget),
+        new ShipLog(99, 1234,
+        [
+            new ShipLogEntry(2, 1, 1233, 0, DeviceKind.Engine, DeviceCommands.Set, 0.75, CommandResult.Ok),
+            new ShipLogEntry(2, 2, 1234, 1, DeviceKind.Gyroscope, 42, -1, CommandResult.UnknownCommand),
+        ]),
+        new ShipLog(99, 1, []),
     ];
 
     [Theory]
@@ -83,6 +89,14 @@ public class PacketCodecTests
 
         Assert.Equal(1 + 8 + 8 + (4 + 4 + 5 * 8) + 8 + 1 + 2 * (1 + 8 + 8), bytes.Length);
         Assert.Equal((byte)PacketType.ShipSnapshot, bytes[0]);
+    }
+
+    [Fact]
+    public void Ship_log_entries_are_28_bytes()
+    {
+        var entry = new ShipLogEntry(2, 1, 1, 0, DeviceKind.Engine, DeviceCommands.Set, 1, CommandResult.Ok);
+
+        Assert.Equal(1 + 8 + 8 + 1 + 3 * 28, PacketCodec.Encode(new ShipLog(1, 1, [entry, entry, entry])).Length);
     }
 
     [Fact]

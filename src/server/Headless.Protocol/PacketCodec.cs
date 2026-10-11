@@ -91,6 +91,24 @@ public static class PacketCodec
                 w.U32(p.Sequence);
                 w.U8((byte)p.Result);
                 break;
+            case ShipLog p:
+                w.U8((byte)PacketType.ShipLog);
+                w.U64(p.Session);
+                w.I64(p.Tick);
+                if (p.Entries.Count > byte.MaxValue) throw new ArgumentException("Too many log entries.", nameof(packet));
+                w.U8((byte)p.Entries.Count);
+                foreach (var e in p.Entries)
+                {
+                    w.I32(e.ShipId);
+                    w.U32(e.Id);
+                    w.I64(e.Tick);
+                    w.U8(e.Device);
+                    w.U8((byte)e.Kind);
+                    w.U8(e.Command);
+                    w.F64(e.Value);
+                    w.U8((byte)e.Result);
+                }
+                break;
             default:
                 throw new ArgumentException($"Unknown packet {packet.GetType().Name}.", nameof(packet));
         }
@@ -123,6 +141,7 @@ public static class PacketCodec
                 PacketType.PlayerSnapshot => ReadPlayerSnapshot(ref r),
                 PacketType.Disconnected => new Disconnected(r.U64(), r.Enum<DisconnectReason>()),
                 PacketType.CommandAck => new CommandAck(r.U64(), r.U32(), r.Enum<CommandResult>()),
+                PacketType.ShipLog => ReadShipLog(ref r),
                 _ => null,
             };
         }
@@ -148,6 +167,16 @@ public static class PacketCodec
         var devices = new DeviceData[r.U8()];
         for (var i = 0; i < devices.Length; i++) devices[i] = new DeviceData(r.Enum<DeviceKind>(), r.F64(), r.F64());
         return new ShipSnapshot(session, tick, ship, mass, devices);
+    }
+
+    private static ShipLog ReadShipLog(ref Reader r)
+    {
+        var session = r.U64();
+        var tick = r.I64();
+        var entries = new ShipLogEntry[r.U8()];
+        for (var i = 0; i < entries.Length; i++)
+            entries[i] = new ShipLogEntry(r.I32(), r.U32(), r.I64(), r.U8(), r.Enum<DeviceKind>(), r.U8(), r.F64(), r.Enum<CommandResult>());
+        return new ShipLog(session, tick, entries);
     }
 
     private static PlayerSnapshot ReadPlayerSnapshot(ref Reader r)

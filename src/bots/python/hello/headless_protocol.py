@@ -38,6 +38,7 @@ class PacketType(IntEnum):
     PLAYER_SNAPSHOT = 0x84
     DISCONNECTED = 0x85
     COMMAND_ACK = 0x86
+    SHIP_LOG = 0x87
 
 
 class ClientRole(IntEnum):
@@ -132,10 +133,31 @@ class CommandAck:
     result: CommandResult
 
 
-ServerPacket = ConnectAccepted | ConnectDenied | ShipSnapshot | PlayerSnapshot | Disconnected | CommandAck
+@dataclass(frozen=True)
+class ShipLogEntry:
+    ship_id: int
+    id: int              # counts up per ship
+    tick: int            # the tick the command was for
+    device: int
+    kind: DeviceKind
+    command: int
+    value: float         # as sent, before clamping
+    result: CommandResult
+
+
+@dataclass(frozen=True)
+class ShipLog:
+    """Players only: their ships' most recent device commands. Entries repeat; dedupe by id."""
+    session: int
+    tick: int
+    entries: tuple[ShipLogEntry, ...]
+
+
+ServerPacket = ConnectAccepted | ConnectDenied | ShipSnapshot | PlayerSnapshot | Disconnected | CommandAck | ShipLog
 
 _SHIP = struct.Struct("<iiddddd")  # id, owner_player_id, x, y, vx, vy, heading
 _DEVICE = struct.Struct("<Bdd")    # kind, rating, setting
+_LOG_ENTRY = struct.Struct("<iIqBBBdB")  # ship_id, id, tick, device, kind, command, value, result
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +219,10 @@ class _Reader:
         kind, rating, setting = self.take(_DEVICE)
         return Device(DeviceKind(kind), rating, setting)
 
+    def log_entry(self) -> ShipLogEntry:
+        ship_id, entry_id, tick, device, kind, command, value, result = self.take(_LOG_ENTRY)
+        return ShipLogEntry(ship_id, entry_id, tick, device, DeviceKind(kind), command, value, CommandResult(result))
+
 
 def decode(data: bytes) -> ServerPacket | None:
     """Decodes a server packet. Returns None for anything malformed or unknown; just drop those."""
@@ -227,6 +253,9 @@ def decode(data: bytes) -> ServerPacket | None:
         elif kind == PacketType.COMMAND_ACK:
             session, sequence, result = r.take("QIB")
             packet = CommandAck(session, sequence, CommandResult(result))
+        elif kind == PacketType.SHIP_LOG:
+            session, tick, count = r.take("QqB")
+            packet = ShipLog(session, tick, tuple(r.log_entry() for _ in range(count)))
         else:
             return None
     except ValueError:  # truncated, bad UTF-8, or an unknown enum value

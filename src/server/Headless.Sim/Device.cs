@@ -30,6 +30,13 @@ public enum CommandOutcome
 }
 
 /// <summary>
+/// One command sent to a ship's device, as the ship remembers it. <paramref name="Id"/> counts up per ship;
+/// <paramref name="Tick"/> is the tick the command was for (it takes effect then, if accepted).
+/// </summary>
+public sealed record CommandLogEntry(
+    int ShipId, long Id, long Tick, int Device, DeviceKind Kind, DeviceCommand Command, double Value, CommandOutcome Outcome);
+
+/// <summary>
 /// A piece of ship hardware a bot controls, like the hardware on 0x10c's DCPU-16 bus. Every device has one setting,
 /// a fraction of its <see cref="Rating"/>, which stays where the bot put it until the bot changes it.
 /// </summary>

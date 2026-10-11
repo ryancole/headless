@@ -14,6 +14,9 @@ public static class ProtocolMapper
     public static Protocol.ShipSnapshot ToPacket(ulong session, SensorSnapshot s) =>
         new(session, s.Tick, ToData(s.Self), s.Mass, s.Devices.Select(ToData).ToList());
 
+    public static ShipLogEntry ToData(CommandLogEntry e) =>
+        new(e.ShipId, (uint)e.Id, e.Tick, (byte)e.Device, (Protocol.DeviceKind)e.Kind, (byte)e.Command, e.Value, ToResult(e.Outcome));
+
     public static CommandResult ToResult(CommandOutcome outcome) => outcome switch
     {
         CommandOutcome.Ok => CommandResult.Ok,

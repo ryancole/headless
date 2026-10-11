@@ -20,6 +20,9 @@ public readonly record struct Outgoing(IPEndPoint To, Packet Packet);
 /// </remarks>
 public sealed class GameHost
 {
+    /// <summary>The newest this many go out when a player's ships have logged more; 40 entries fit in a packet.</summary>
+    private const int MaxLogEntriesPerPacket = 40;
+
     private readonly Lock _gate = new();
     private readonly Simulation _sim;
     private readonly Dictionary<string, int> _shipIdsByBotToken = new(StringComparer.Ordinal);
@@ -109,12 +112,19 @@ public sealed class GameHost
 
             foreach (var session in _sessionsByAddress.Values)
             {
-                Packet snapshot = session.Role switch
+                if (session.Role == ClientRole.Bot)
                 {
-                    ClientRole.Bot => ProtocolMapper.ToPacket(session.Id, _sim.Sense(session.SubjectId)),
-                    _ => new Protocol.PlayerSnapshot(session.Id, tick, _sim.SensePlayer(session.SubjectId).Ships.Select(ProtocolMapper.ToData).ToList()),
-                };
-                outgoing.Add(new(session.Address, snapshot));
+                    outgoing.Add(new(session.Address, ProtocolMapper.ToPacket(session.Id, _sim.Sense(session.SubjectId))));
+                    continue;
+                }
+
+                var sensed = _sim.SensePlayer(session.SubjectId);
+                outgoing.Add(new(session.Address, new Protocol.PlayerSnapshot(session.Id, tick, sensed.Ships.Select(ProtocolMapper.ToData).ToList())));
+                if (sensed.CommandLog.Count > 0)
+                {
+                    var entries = sensed.CommandLog.OrderBy(e => e.Tick).ThenBy(e => e.Id).TakeLast(MaxLogEntriesPerPacket);
+                    outgoing.Add(new(session.Address, new ShipLog(session.Id, tick, entries.Select(ProtocolMapper.ToData).ToList())));
+                }
             }
 
             if (_locationLogEveryTicks > 0 && tick % _locationLogEveryTicks == 0)

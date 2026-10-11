@@ -7,7 +7,7 @@ public sealed record ShipState(int Id, string Name, int OwnerPlayerId, Vec2 Posi
 
 public sealed record DeviceState(DeviceKind Kind, double Rating, double Setting);
 
-/// <summary>What one player knows at a given tick: themselves, and the ships they own.</summary>
-public sealed record PlayerSnapshot(long Tick, PlayerState Self, IReadOnlyList<ShipState> Ships);
+/// <summary>What one player knows at a given tick: themselves, the ships they own, and those ships' command logs.</summary>
+public sealed record PlayerSnapshot(long Tick, PlayerState Self, IReadOnlyList<ShipState> Ships, IReadOnlyList<CommandLogEntry> CommandLog);
 
 public sealed record PlayerState(int Id, string Name);

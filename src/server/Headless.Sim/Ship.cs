@@ -23,6 +23,18 @@ public sealed class Ship
     /// <summary>Which way the ship points, in radians: 0 is +x, counter-clockwise, in [-π, π).</summary>
     public double Heading { get; internal set; }
 
+    /// <summary>The most recent commands sent to this ship's devices, oldest first. Its crew can read it on board.</summary>
+    public IReadOnlyCollection<CommandLogEntry> CommandLog => _commandLog;
+
     /// <summary>Commands accepted so far this tick, against <see cref="SimConfig.CommandsPerTick"/>.</summary>
     internal int CommandsThisTick { get; set; }
+
+    private readonly Queue<CommandLogEntry> _commandLog = new();
+    private long _nextLogId = 1;
+
+    internal void Record(long tick, int device, DeviceCommand command, double value, CommandOutcome outcome, int keep)
+    {
+        _commandLog.Enqueue(new CommandLogEntry(Id, _nextLogId++, tick, device, Devices[device].Kind, command, value, outcome));
+        while (_commandLog.Count > keep) _commandLog.Dequeue();
+    }
 }

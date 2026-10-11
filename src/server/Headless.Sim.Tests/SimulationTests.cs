@@ -151,6 +151,52 @@ public class SimulationTests
     }
 
     [Fact]
+    public void Ships_log_the_commands_their_devices_get()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+        sim.Step();
+
+        sim.Command(ship.Id, Engine, DeviceCommand.Set, 0.5);
+        sim.Command(ship.Id, Gyroscope, DeviceCommand.Set, double.NaN);
+        sim.Command(ship.Id, 7, DeviceCommand.Set, 1); // no such device: nothing to log it against
+
+        Assert.Equal(
+        [
+            new CommandLogEntry(ship.Id, 1, 2, Engine, DeviceKind.Engine, DeviceCommand.Set, 0.5, CommandOutcome.Ok),
+            new CommandLogEntry(ship.Id, 2, 2, Gyroscope, DeviceKind.Gyroscope, DeviceCommand.Set, double.NaN, CommandOutcome.InvalidValue),
+        ], ship.CommandLog);
+    }
+
+    [Fact]
+    public void The_command_log_keeps_only_the_most_recent()
+    {
+        var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var sim = new Simulation(world);
+
+        for (var i = 0; i < 25; i++)
+        {
+            sim.Command(ship.Id, Engine, DeviceCommand.Set, i / 25.0);
+            sim.Step();
+        }
+
+        Assert.Equal(Enumerable.Range(16, 10).Select(i => (long)i), ship.CommandLog.Select(e => e.Id));
+    }
+
+    [Fact]
+    public void Players_see_the_command_logs_of_their_own_ships()
+    {
+        var (world, player, ship) = WorldWithPlayerAndShip(Vec2.Zero);
+        var other = world.AddShip("not mine", Vec2.Zero, world.AddPlayer("other"));
+        var sim = new Simulation(world);
+
+        sim.Command(ship.Id, Engine, DeviceCommand.Set, 1);
+        sim.Command(other.Id, Engine, DeviceCommand.Set, 1);
+
+        Assert.Equal([ship.Id], sim.SensePlayer(player.Id).CommandLog.Select(e => e.ShipId));
+    }
+
+    [Fact]
     public void Each_ship_gets_a_command_budget_per_tick()
     {
         var (world, _, ship) = WorldWithPlayerAndShip(Vec2.Zero);

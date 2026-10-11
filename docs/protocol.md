@@ -44,6 +44,7 @@ client                                   server
   │── KeepAlive (session) ────────────────▶│   every 1 s
   │── DeviceCommand (session, seq, ...) ──▶│   bots only; resend every 0.25 s until acked
   │◀──────── CommandAck (session, seq, ok) │
+  │◀──────── ShipLog (session, entries)    │   players only, when their ships logged commands
   │                                        │
   │── Disconnect (session) ───────────────▶│   client leaves, or
   │◀──────── Disconnected (session, reason)│   server ends it
@@ -190,6 +191,26 @@ For example, session `0x0807060504030201`, sequence `0x0D0C0B0A`, set device 1 t
 
 **`0x86` CommandAck**: `type u8`, `session u64`, `sequence u32` (echoed from the command), `result u8` (see
 [Commands](#commands)).
+
+**`0x87` ShipLog** (to players): `type u8`, `session u64`, `tick i64`, `count u8`, then `count` **log entries**,
+oldest first. Each ship remembers the last 10 commands its devices received, refused or not (it's what the
+cockpit terminal shows). After each tick that a player's ships have anything logged, the server sends the
+latest entries, up to 40. The same entries repeat from tick to tick, so a lost packet costs nothing: show only
+entries with an id newer than the last one shown. Duplicate commands that the server answered `stale` never
+reach the ship, so they aren't logged.
+
+A **log entry** is 28 bytes:
+
+| Field | Type | Notes |
+|---|---|---|
+| ship_id | i32 | |
+| id | u32 | counts up by one per ship, so a gap means entries were missed |
+| tick | i64 | the tick the command was for; it takes effect then, if accepted |
+| device | u8 | the device index |
+| kind | u8 | the device's kind |
+| command | u8 | as sent |
+| value | f64 | as sent, before clamping |
+| result | u8 | as in `CommandAck` (never `stale`) |
 
 A **ship** is 48 bytes:
 

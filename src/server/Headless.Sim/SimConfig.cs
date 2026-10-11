@@ -9,6 +9,9 @@ public sealed record SimConfig
     /// <summary>How many device commands each ship accepts per tick. Rewards good decisions over many decisions.</summary>
     public int CommandsPerTick { get; init; } = 4;
 
+    /// <summary>How many recent commands each ship keeps in its <see cref="Ship.CommandLog"/>.</summary>
+    public int CommandLogLength { get; init; } = 10;
+
     // Every ship is fitted the same for now: one engine and one gyroscope. Full throttle accelerates at 2 m/s².
 
     /// <summary>In kilograms.</summary>

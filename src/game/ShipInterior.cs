@@ -44,6 +44,9 @@ public partial class ShipInterior : Node3D
     };
 
     private static readonly Color Cyan = new(0.3f, 0.8f, 1), Green = new(0.4f, 1, 0.5f);
+
+    /// <summary>The cockpit terminal showing the commands the ship's bot sends.</summary>
+    public CommandLogScreen CommandLog { get; private set; } = null!;
     private static readonly Color LampWhite = new(1, 0.95f, 0.85f), EngineOrange = new(1, 0.5f, 0.2f);
 
     public override void _Ready()
@@ -101,11 +104,14 @@ public partial class ShipInterior : Node3D
         var r = Cockpit;
         // Console along the bow wall: a desk, three monitors above it and a row of small blue lights.
         Box(new(0, 0.5f, r.Fore + 0.4f), new(3.6f, 1, 0.8f), _metal);
+        // The middle monitor is the command log; the other two are plain glowing panels for now.
         for (var i = -1; i <= 1; i++)
         {
             Box(new(i * 1.1f, 1.75f, r.Fore + 0.05f), new(1, 0.75f, 0.1f), _metal);
-            Box(new(i * 1.1f, 1.75f, r.Fore + 0.11f), new(0.86f, 0.62f, 0.02f), Glow(i == 0 ? Green : Cyan), solid: false);
+            if (i != 0) Box(new(i * 1.1f, 1.75f, r.Fore + 0.11f), new(0.86f, 0.62f, 0.02f), Glow(Cyan), solid: false);
         }
+        CommandLog = new CommandLogScreen { Position = new(0, 1.75f, r.Fore + 0.105f) };
+        AddChild(CommandLog);
         for (var i = 0; i < 8; i++)
             Box(new(-1.4f + i * 0.4f, 1.01f, r.Fore + 0.65f), new(0.08f, 0.02f, 0.08f), Glow(Cyan), solid: false);
 

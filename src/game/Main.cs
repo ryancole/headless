@@ -42,6 +42,13 @@ public partial class Main : Node3D
             GD.Print($"Connected as player {accepted.SubjectId} '{accepted.SubjectName}' ({accepted.TickSeconds:0.0}s ticks)");
             _status.Text = $"Connected as {accepted.SubjectName}";
         };
+        // The ship interior is the player's first ship, so its terminal shows that ship's commands.
+        var terminal = GetNode<ShipInterior>("Ship/Interior").CommandLog;
+        _connection.ShipLogReceived += terminal.Show;
+        _connection.PlayerSnapshotReceived += snapshot =>
+        {
+            if (snapshot.Ships.Count > 0) terminal.ShipId = snapshot.Ships[0].Id;
+        };
         _connection.PlayerSnapshotReceived += snapshot =>
             GD.Print($"[tick {snapshot.Tick}] " + string.Join(", ",
                 snapshot.Ships.Select(ship => $"ship {ship.Id} at ({ship.X:0.0}, {ship.Y:0.0}), "

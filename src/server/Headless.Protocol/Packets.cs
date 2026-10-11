@@ -18,6 +18,7 @@ public enum PacketType : byte
     PlayerSnapshot = 0x84,
     Disconnected = 0x85,
     CommandAck = 0x86,
+    ShipLog = 0x87,
 }
 
 /// <summary>What a client connects as. Decides which token it must present and which snapshots it gets.</summary>
@@ -142,6 +143,19 @@ public sealed record Disconnected(ulong Session, DisconnectReason Reason) : Pack
 public sealed record CommandAck(ulong Session, uint Sequence, CommandResult Result) : Packet;
 
 /// <summary>
+/// Sent to a player every tick that their ships have logged commands: the most recent entries, oldest first. The
+/// same entries repeat from tick to tick, so a lost packet costs nothing; show only ids newer than the last seen.
+/// </summary>
+public sealed record ShipLog(ulong Session, long Tick, IReadOnlyList<ShipLogEntry> Entries) : Packet
+{
+    // Records compare lists by reference; compare contents so equal packets are equal.
+    public bool Equals(ShipLog? other) =>
+        other is not null && Session == other.Session && Tick == other.Tick && Entries.SequenceEqual(other.Entries);
+
+    public override int GetHashCode() => HashCode.Combine(Session, Tick, Entries.Count);
+}
+
+/// <summary>
 /// A ship as it appears on the wire. Positions are metres on a 2D plane, velocities metres per second, and the heading
 /// is radians: 0 points along +x, counter-clockwise, in [-π, π).
 /// </summary>
@@ -150,3 +164,11 @@ public readonly record struct ShipData(int Id, int OwnerPlayerId, double X, doub
 /// <param name="Rating">What the device does at a setting of 1; units depend on <paramref name="Kind"/>.</param>
 /// <param name="Setting">Where the bot last set it.</param>
 public readonly record struct DeviceData(DeviceKind Kind, double Rating, double Setting);
+
+/// <summary>A command a ship's bot sent to one of its devices, refused or not.</summary>
+/// <param name="Id">Counts up per ship.</param>
+/// <param name="Tick">The tick the command was for; it takes effect then, if accepted.</param>
+/// <param name="Command">Raw, like <see cref="DeviceCommand.Command"/>: unknown commands get logged too.</param>
+/// <param name="Value">The value the bot sent, before any clamping.</param>
+public readonly record struct ShipLogEntry(
+    int ShipId, uint Id, long Tick, byte Device, DeviceKind Kind, byte Command, double Value, CommandResult Result);

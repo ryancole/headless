@@ -263,6 +263,24 @@ public class GameHostTests
     }
 
     [Fact]
+    public void Players_get_their_ships_command_log()
+    {
+        var host = NewHost();
+        var bot = Connect(host, Alice, ClientRole.Bot, "b1");
+        var player = Connect(host, Bob, ClientRole.Player, "p1");
+        Assert.DoesNotContain(host.Tick(0), o => o.Packet is ShipLog); // nothing logged yet
+
+        Command(host, Alice, bot.Session, 1, device: 0, value: 0.5);
+        Command(host, Alice, bot.Session, 1, device: 0, value: 0.5); // a resend: not logged again
+        var sent = host.Tick(0);
+
+        var log = Assert.IsType<ShipLog>(Assert.Single(sent, o => o.To.Equals(Bob) && o.Packet is ShipLog).Packet);
+        Assert.Equal(player.Session, log.Session);
+        Assert.Equal([new ShipLogEntry(2, 1, 2, 0, DeviceKind.Engine, DeviceCommands.Set, 0.5, CommandResult.Ok)], log.Entries);
+        Assert.DoesNotContain(sent, o => o.To.Equals(Alice) && o.Packet is ShipLog); // bots don't get it
+    }
+
+    [Fact]
     public void Commands_keep_the_session_open()
     {
         var host = NewHost();

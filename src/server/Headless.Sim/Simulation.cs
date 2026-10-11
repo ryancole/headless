@@ -28,17 +28,27 @@ public sealed class Simulation(World world)
         World.Tick++;
     }
 
-    /// <summary>A bot's command to one of its ship's devices. Takes effect from the next <see cref="Step"/>.</summary>
+    /// <summary>
+    /// A bot's command to one of its ship's devices. Takes effect from the next <see cref="Step"/>. Every command
+    /// that reaches a device goes in the ship's <see cref="Ship.CommandLog"/>, refused or not.
+    /// </summary>
     public CommandOutcome Command(int shipId, int deviceIndex, DeviceCommand command, double value)
     {
         var ship = World.Ships[shipId];
         if (deviceIndex < 0 || deviceIndex >= ship.Devices.Count) return CommandOutcome.UnknownDevice;
+
+        var outcome = Apply(ship, ship.Devices[deviceIndex], command, value);
+        ship.Record(World.Tick + 1, deviceIndex, command, value, outcome, World.Config.CommandLogLength);
+        return outcome;
+    }
+
+    private CommandOutcome Apply(Ship ship, Device device, DeviceCommand command, double value)
+    {
         if (command != DeviceCommand.Set) return CommandOutcome.UnknownCommand;
         if (!double.IsFinite(value)) return CommandOutcome.InvalidValue;
         if (ship.CommandsThisTick >= World.Config.CommandsPerTick) return CommandOutcome.OverBudget;
 
         ship.CommandsThisTick++;
-        var device = ship.Devices[deviceIndex];
         device.Setting = Math.Clamp(value, device.MinSetting, 1);
         return CommandOutcome.Ok;
     }
@@ -53,8 +63,9 @@ public sealed class Simulation(World world)
     public PlayerSnapshot SensePlayer(int playerId)
     {
         var player = World.Players[playerId];
-        var ships = World.Ships.Values.Where(s => s.OwnerPlayerId == playerId).Select(ShipStateOf).ToList();
-        return new PlayerSnapshot(World.Tick, new PlayerState(player.Id, player.Name), ships);
+        var owned = World.Ships.Values.Where(s => s.OwnerPlayerId == playerId).ToList();
+        var log = owned.SelectMany(s => s.CommandLog).ToList();
+        return new PlayerSnapshot(World.Tick, new PlayerState(player.Id, player.Name), owned.Select(ShipStateOf).ToList(), log);
     }
 
     private static ShipState ShipStateOf(Ship ship) =>

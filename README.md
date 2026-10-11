@@ -47,8 +47,10 @@ dotnet run --project src/server/Headless.Server -- --Game:TicksPerSecond=40
 
 The client is a Godot 4.7 (.NET edition) project in `src/game`. Open `src/game/project.godot` in the Godot
 editor and press Play. You're standing in a basic three-room ship (cockpit, hold, engine room): WASD to
-move, mouse to look, Space to jump, Shift to run, Esc to free the mouse (click to grab it again). The ship
-is the same for everyone and isn't linked to server state yet, and the server doesn't know where you are.
+move, mouse to look, Space to jump, Shift to run, Esc to free the mouse (click to grab it again). The centre
+monitor in the cockpit is a terminal showing the commands your ship's bot sends (tick, device, value,
+and why if the ship refused one). Otherwise the ship is the same for everyone and isn't linked to server
+state, and the server doesn't know where you are.
 
 It also connects to the server as Player One (`localhost:5080`, token `dev-player-1`) and
 prints each snapshot to the Output panel; the connection status is shown top left. If the server isn't running or goes away it keeps retrying; a

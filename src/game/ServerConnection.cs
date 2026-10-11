@@ -51,6 +51,8 @@ public sealed class ServerConnection(string host, int port, ClientRole role, str
     public event Action<PlayerSnapshot>? PlayerSnapshotReceived;
     /// <inheritdoc cref="PlayerSnapshotReceived"/>
     public event Action<ShipSnapshot>? ShipSnapshotReceived;
+    /// <summary>Players: their ships' recent commands. Entries repeat between packets; deduplicate by entry id.</summary>
+    public event Action<ShipLog>? ShipLogReceived;
 
     public void Update()
     {
@@ -131,6 +133,7 @@ public sealed class ServerConnection(string host, int port, ClientRole role, str
         {
             PlayerSnapshot p => p.Session,
             ShipSnapshot p => p.Session,
+            ShipLog p => p.Session,
             Disconnected p => p.Session,
             _ => 0UL, // Includes repeated ConnectAccepteds, answering requests resent before the first answer arrived.
         };
@@ -146,6 +149,9 @@ public sealed class ServerConnection(string host, int port, ClientRole role, str
             case ShipSnapshot p when p.Tick > _lastTick:
                 _lastTick = p.Tick;
                 ShipSnapshotReceived?.Invoke(p);
+                break;
+            case ShipLog p:
+                ShipLogReceived?.Invoke(p);
                 break;
             case Disconnected { Reason: DisconnectReason.Superseded }:
                 // Reconnecting would just knock the other connection off in turn.
