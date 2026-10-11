@@ -39,6 +39,9 @@ public partial class ShipInterior : Node3D
 
     /// <summary>The cockpit terminal showing the commands the ship's bot sends.</summary>
     public CommandLogScreen CommandLog { get; private set; } = null!;
+
+    /// <summary>The cockpit terminal showing the ship's position, speed, heading and course.</summary>
+    public ShipStatusScreen Status { get; private set; } = null!;
     private static readonly Color LampWhite = new(1, 0.95f, 0.85f), EngineOrange = new(1, 0.5f, 0.2f);
 
     public override void _Ready()
@@ -99,14 +102,16 @@ public partial class ShipInterior : Node3D
         var r = Cockpit;
         // Console along the bow wall: a desk, three monitors above it and a row of small blue lights.
         Box(new(0, 0.5f, r.Fore + 0.4f), new(3.6f, 1, 0.8f), _metal);
-        // The middle monitor is the command log, mostly dark so it gives off less light; the other two are plain
-        // glowing panels for now. Each casts its own light into the cockpit.
+        // The left monitor is the nav status and the middle one the command log, both mostly dark so they give off
+        // less light; the right one is a plain glowing panel for now. Each casts its own light into the cockpit.
         for (var i = -1; i <= 1; i++)
         {
             Box(new(i * 1.1f, 1.75f, r.Fore + 0.05f), new(1, 0.75f, 0.1f), _metal);
-            if (i != 0) Box(new(i * 1.1f, 1.75f, r.Fore + 0.11f), new(0.86f, 0.62f, 0.02f), Glow(Cyan), solid: false);
-            PanelLight(new(i * 1.1f, 1.75f, r.Fore + 0.16f), yaw: 180, Cyan, energy: i == 0 ? 0.15f : 0.5f, range: 4);
+            if (i == 1) Box(new(i * 1.1f, 1.75f, r.Fore + 0.11f), new(0.86f, 0.62f, 0.02f), Glow(Cyan), solid: false);
+            PanelLight(new(i * 1.1f, 1.75f, r.Fore + 0.16f), yaw: 180, Cyan, energy: i == 1 ? 0.5f : 0.15f, range: 4);
         }
+        Status = new ShipStatusScreen { Position = new(-1.1f, 1.75f, r.Fore + 0.105f) };
+        AddChild(Status);
         CommandLog = new CommandLogScreen { Position = new(0, 1.75f, r.Fore + 0.105f) };
         AddChild(CommandLog);
         for (var i = 0; i < 8; i++)
