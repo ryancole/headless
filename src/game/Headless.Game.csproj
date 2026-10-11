@@ -5,4 +5,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Headless.Game</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../server/Headless.Protocol/Headless.Protocol.csproj" />
+  </ItemGroup>
 </Project>
