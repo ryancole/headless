@@ -13,7 +13,7 @@ Right now the server tracks players and their ships. Every ship has a position a
 | `src/server/Headless.Server` | The game server: tick loop and UDP socket (port 5080). |
 | `src/server/Headless.*.Tests` | xUnit tests for the sim, protocol and server. |
 | `src/bots/python/hello` | Python stock bot that connects and prints its ship's position. |
-| `src/game` | Godot 4 (C#) game client. Connects as a player and logs snapshots; nothing visual yet. |
+| `src/game` | Godot 4 (C#) game client: walk around inside a ship in first person; connects as a player. |
 | `docs/` | [Core loop](docs/core-loop.md), [protocol](docs/protocol.md), [art style](docs/art-style.md). |
 
 ## Quick start
@@ -46,14 +46,21 @@ dotnet run --project src/server/Headless.Server -- --Game:TicksPerSecond=40
 ## Game client
 
 The client is a Godot 4.7 (.NET edition) project in `src/game`. Open `src/game/project.godot` in the Godot
-editor and press Play. It connects to the server as Player One (`localhost:5080`, token `dev-player-1`) and
-prints each snapshot to the Output panel. If the server isn't running or goes away it keeps retrying; a
+editor and press Play. You're standing in a basic three-room ship (cockpit, hold, engine room): WASD to
+move, mouse to look, Space to jump, Shift to run, Esc to free the mouse (click to grab it again). The ship
+is the same for everyone and isn't linked to server state yet, and the server doesn't know where you are.
+
+It also connects to the server as Player One (`localhost:5080`, token `dev-player-1`) and
+prints each snapshot to the Output panel; the connection status is shown top left. If the server isn't running or goes away it keeps retrying; a
 denied token stops it. Change the host, port or token in the inspector on the `Main` node, or on the
 command line after `--`. To run it headless, e.g. as Player Two:
 
 ```bash
 "C:\Program Files\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe" --headless --path src/game -- --token=dev-player-2
 ```
+
+`-- --screenshot=out.png` saves a PNG of the first second and quits, handy for checking visuals without
+playing.
 
 To build and start the server (in its own window) and the game together:
 
